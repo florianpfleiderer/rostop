@@ -4,6 +4,7 @@
 //! statistics, registry, and rendering math can be exercised on any platform
 //! without a ROS2 install.
 
+pub mod message;
 pub mod registry;
 pub mod sparkline;
 pub mod stats;

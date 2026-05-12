@@ -1,0 +1,33 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    container:
+      image: ros:jazzy-ros-base
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install system deps
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends \
+            curl ca-certificates build-essential pkg-config git \
+            clang libclang-dev cmake
+      - name: Install Rust 1.88
+        run: |
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | \
+            sh -s -- -y --default-toolchain 1.88.0 --profile minimal \
+                       --component rustfmt --component clippy
+          echo "$HOME/.cargo/bin" >> $GITHUB_PATH
+      - name: cargo fmt
+        run: cargo fmt --all -- --check
+      - name: cargo clippy
+        run: cargo clippy --workspace --all-targets -- -D warnings
+      - name: cargo test
+        run: cargo test --workspace --all-targets

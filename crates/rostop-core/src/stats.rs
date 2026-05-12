@@ -107,11 +107,8 @@ impl TopicStats {
             .map(|w| (w[1] - w[0]) as f64 / 1_000_000.0)
             .collect();
         let mean: f64 = deltas_ms.iter().sum::<f64>() / deltas_ms.len() as f64;
-        let var: f64 = deltas_ms
-            .iter()
-            .map(|d| (d - mean).powi(2))
-            .sum::<f64>()
-            / deltas_ms.len() as f64;
+        let var: f64 =
+            deltas_ms.iter().map(|d| (d - mean).powi(2)).sum::<f64>() / deltas_ms.len() as f64;
         var.sqrt()
     }
 }

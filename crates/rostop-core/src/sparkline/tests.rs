@@ -28,10 +28,7 @@ fn increasing_values_render_with_increasing_heights() {
     let blocks = [' ', '▁', '▂', '▃', '▄', '▅', '▆', '▇', '█'];
     let idx = |c: char| blocks.iter().position(|&b| b == c).unwrap();
     for w in chars.windows(2) {
-        assert!(
-            idx(w[1]) >= idx(w[0]),
-            "non-monotonic sparkline: {r:?}"
-        );
+        assert!(idx(w[1]) >= idx(w[0]), "non-monotonic sparkline: {r:?}");
     }
 }
 
@@ -42,7 +39,7 @@ fn buffer_evicts_oldest_when_over_capacity() {
     s.push(20.0);
     s.push(30.0);
     s.push(40.0); // should evict the 10.0
-    // Max is now 40, so the third (newest) cell should be the full block.
+                  // Max is now 40, so the third (newest) cell should be the full block.
     let chars: Vec<char> = s.render().chars().collect();
     assert_eq!(chars.len(), 3);
     assert_eq!(chars[2], '█');

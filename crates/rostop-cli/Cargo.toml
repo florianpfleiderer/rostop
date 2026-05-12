@@ -8,6 +8,9 @@ repository.workspace = true
 authors.workspace = true
 description = "Interactive TUI for inspecting and debugging ROS2 topics."
 
+[lib]
+path = "src/lib.rs"
+
 [[bin]]
 name = "rostop"
 path = "src/main.rs"

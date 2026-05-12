@@ -14,7 +14,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
-      | sh -s -- -y --default-toolchain 1.84.0 --profile minimal \
+      | sh -s -- -y --default-toolchain 1.88.0 --profile minimal \
       --component rustfmt --component clippy
 
 ENV RMW_IMPLEMENTATION=rmw_cyclonedds_cpp

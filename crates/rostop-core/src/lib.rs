@@ -5,4 +5,5 @@
 //! without a ROS2 install.
 
 pub mod registry;
+pub mod sparkline;
 pub mod stats;

@@ -60,6 +60,75 @@ impl TopicRegistry {
     pub fn get(&self, name: &str) -> Option<&TopicEntry> {
         self.entries.get(name)
     }
+
+    /// Insert a topic, or update its type if it already exists.
+    pub fn upsert(&mut self, name: &str, type_name: &str) {
+        self.entries
+            .entry(name.to_string())
+            .and_modify(|e| e.type_name = type_name.to_string())
+            .or_insert_with(|| TopicEntry {
+                name: name.to_string(),
+                type_name: type_name.to_string(),
+                publishers: 0,
+                subscribers: 0,
+                stats: TopicStats::new(DEFAULT_WINDOW_NS),
+            });
+    }
+
+    /// Drop a topic (e.g. it disappeared from the ROS graph).
+    pub fn remove(&mut self, name: &str) {
+        self.entries.remove(name);
+    }
+
+    /// Feed a message sample for a known topic. Unknown topics are silently
+    /// ignored — discovery is the registry's job, not the sample stream's.
+    pub fn record(&mut self, name: &str, t_ns: u64, bytes: u32) {
+        if let Some(e) = self.entries.get_mut(name) {
+            e.stats.record(t_ns, bytes);
+        }
+    }
+
+    /// Update publisher and subscriber counts for a topic.
+    pub fn set_endpoints(&mut self, name: &str, publishers: u32, subscribers: u32) {
+        if let Some(e) = self.entries.get_mut(name) {
+            e.publishers = publishers;
+            e.subscribers = subscribers;
+        }
+    }
+
+    /// Returns entries whose name or type contains `query` (case-insensitive).
+    pub fn filtered(&self, query: &str) -> Vec<&TopicEntry> {
+        let q = query.to_lowercase();
+        self.entries
+            .values()
+            .filter(|e| {
+                e.name.to_lowercase().contains(&q) || e.type_name.to_lowercase().contains(&q)
+            })
+            .collect()
+    }
+
+    /// Entries sorted by `key`. Rate-based sorts use the rolling window ending at `now_ns`.
+    pub fn sorted_by(&self, key: SortKey, order: SortOrder, now_ns: u64) -> Vec<&TopicEntry> {
+        let mut out: Vec<&TopicEntry> = self.entries.values().collect();
+        out.sort_by(|a, b| match key {
+            SortKey::Name => a.name.cmp(&b.name),
+            SortKey::Type => a.type_name.cmp(&b.type_name),
+            SortKey::Hz => a
+                .stats
+                .hz(now_ns)
+                .partial_cmp(&b.stats.hz(now_ns))
+                .unwrap_or(std::cmp::Ordering::Equal),
+            SortKey::Bandwidth => a
+                .stats
+                .bps(now_ns)
+                .partial_cmp(&b.stats.bps(now_ns))
+                .unwrap_or(std::cmp::Ordering::Equal),
+        });
+        if order == SortOrder::Descending {
+            out.reverse();
+        }
+        out
+    }
 }
 
 #[cfg(test)]

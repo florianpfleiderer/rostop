@@ -1,0 +1,23 @@
+[package]
+name = "rostop-cli"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+description = "Interactive TUI for inspecting and debugging ROS2 topics."
+
+[[bin]]
+name = "rostop"
+path = "src/main.rs"
+
+[dependencies]
+rostop-core = { path = "../rostop-core" }
+ratatui.workspace = true
+crossterm.workspace = true
+anyhow.workspace = true
+clap.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true

@@ -258,13 +258,16 @@ fn peer_mismatch_error(foreign_topics: &HashSet<String>) -> anyhow::Error {
     let plural = if count == 1 { "" } else { "s" };
     let probe_secs = PROBE_DURATION.as_secs();
     let topics = preview.join(", ");
+    let target_distro = env!("ROSTOP_TARGET_DISTRO");
+    let target_rmw = env!("ROSTOP_TARGET_RMW");
     anyhow::anyhow!(
         "Discovered {count} foreign-published topic{plural} but received zero samples in {probe_secs}s. \
-         This is the signature of a ROS 2 distro or RMW mismatch: rostop is a jazzy + rmw_cyclonedds_cpp \
-         participant, and peers on a different distro (Humble, Iron) or RMW (rmw_fastrtps_cpp) trigger \
-         CDR decode failures (\"sequence size exceeds remaining buffer\" on the robot side). \
+         This is the signature of a ROS 2 distro or RMW mismatch: rostop was built against \
+         {target_distro} + {target_rmw}, and peers on a different distro or RMW trigger CDR decode \
+         failures (\"sequence size exceeds remaining buffer\" on the robot side). \
          Topics seen: {topics}{extra_str}. \
-         Rebuild rostop against the target distro / RMW, or set {SKIP_PROBE_ENV}=1 to bypass."
+         Rebuild rostop against the target distro / RMW (e.g. `just run-live-humble` for a \
+         Humble + rmw_fastrtps_cpp peer), or set {SKIP_PROBE_ENV}=1 to bypass."
     )
 }
 

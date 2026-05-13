@@ -176,8 +176,7 @@ fn spin_loop(
                         .get_publishers_info_by_topic(name, false)
                         .unwrap_or_default();
                     let publishers = pubs_info.len() as u32;
-                    let foreign_pub =
-                        pubs_info.iter().any(|p| p.node_name != SELF_NODE_NAME);
+                    let foreign_pub = pubs_info.iter().any(|p| p.node_name != SELF_NODE_NAME);
                     let _ = event_tx.send(BackendEvent::Topic {
                         name: name.clone(),
                         type_name: ty.clone(),

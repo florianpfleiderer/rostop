@@ -5,3 +5,4 @@ Cargo.lock.bak
 *.log
 .idea/
 .vscode/
+CLAUDE.local.md

@@ -1030,6 +1030,7 @@ dependencies = [
  "r2r",
  "ratatui",
  "rostop-core",
+ "serde_json",
  "tokio",
  "tracing",
  "tracing-subscriber",

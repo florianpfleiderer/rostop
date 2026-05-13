@@ -15,6 +15,12 @@ path = "src/lib.rs"
 name = "rostop"
 path = "src/main.rs"
 
+[features]
+default = []
+# Compile the live r2r-backed backend. Requires ROS 2 Jazzy headers + libs
+# (rcl, rmw, the message packages declared in package.xml) at build time.
+live = ["dep:r2r", "dep:futures"]
+
 [dependencies]
 rostop-core = { path = "../rostop-core" }
 ratatui.workspace = true
@@ -24,3 +30,5 @@ clap.workspace = true
 tokio.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
+r2r = { version = "0.9", optional = true }
+futures = { version = "0.3", optional = true }

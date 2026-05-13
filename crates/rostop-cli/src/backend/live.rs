@@ -13,7 +13,9 @@
 //! is a v0.2 item.
 
 use std::collections::{HashMap, HashSet};
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::mpsc::{self, Receiver, Sender};
+use std::sync::Arc;
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -28,6 +30,18 @@ use crate::backend::{BackendEvent, RosBackend};
 
 const GRAPH_POLL_INTERVAL: Duration = Duration::from_millis(500);
 const SPIN_TICK: Duration = Duration::from_millis(50);
+
+/// rostop's own ROS node name. Used to tell rostop-published endpoints apart
+/// from peer-published ones during the peer probe.
+const SELF_NODE_NAME: &str = "rostop";
+
+/// How long to listen for samples from foreign publishers before deciding
+/// whether peers on the wire speak rostop's wire format.
+const PROBE_DURATION: Duration = Duration::from_secs(2);
+
+/// Env var that disables the peer probe. Useful for empty graphs, transient-
+/// local-only setups, or when running rostop ahead of the rest of the system.
+const SKIP_PROBE_ENV: &str = "ROSTOP_SKIP_PEER_PROBE";
 
 pub struct LiveBackend {
     rx: Receiver<BackendEvent>,
@@ -111,24 +125,39 @@ fn spin_loop(
             return;
         }
     };
-    let mut node = match r2r::Node::create(ctx, "rostop", "").context("r2r::Node::create failed") {
-        Ok(n) => n,
-        Err(e) => {
-            let _ = init_tx.send(Err(e));
-            return;
-        }
-    };
-    let _ = init_tx.send(Ok(()));
+    let mut node =
+        match r2r::Node::create(ctx, SELF_NODE_NAME, "").context("r2r::Node::create failed") {
+            Ok(n) => n,
+            Err(e) => {
+                let _ = init_tx.send(Err(e));
+                return;
+            }
+        };
 
     let mut pool = LocalPool::new();
     let spawner = pool.spawner();
     let mut known: HashMap<String, String> = HashMap::new();
+    let mut foreign_topics: HashSet<String> = HashSet::new();
+    let samples_received = Arc::new(AtomicUsize::new(0));
     let mut last_poll = Instant::now()
         .checked_sub(GRAPH_POLL_INTERVAL)
         .unwrap_or_else(Instant::now);
 
+    let skip_probe = std::env::var(SKIP_PROBE_ENV).is_ok_and(|v| !v.is_empty() && v != "0");
+    let probe_deadline = Instant::now() + PROBE_DURATION;
+    let mut init_sent = false;
+    if skip_probe {
+        let _ = init_tx.send(Ok(()));
+        init_sent = true;
+    }
+
     loop {
         if shutdown_rx.try_recv().is_ok() {
+            if !init_sent {
+                let _ = init_tx.send(Err(anyhow::anyhow!(
+                    "spin thread shut down before peer probe completed"
+                )));
+            }
             break;
         }
 
@@ -143,10 +172,12 @@ fn spin_loop(
                         continue;
                     }
                     let Some(ty) = types.first() else { continue };
-                    let publishers = node
+                    let pubs_info = node
                         .get_publishers_info_by_topic(name, false)
-                        .map(|v| v.len() as u32)
-                        .unwrap_or(0);
+                        .unwrap_or_default();
+                    let publishers = pubs_info.len() as u32;
+                    let foreign_pub =
+                        pubs_info.iter().any(|p| p.node_name != SELF_NODE_NAME);
                     let _ = event_tx.send(BackendEvent::Topic {
                         name: name.clone(),
                         type_name: ty.clone(),
@@ -154,6 +185,9 @@ fn spin_loop(
                         subscribers: 0,
                     });
                     known.insert(name.clone(), ty.clone());
+                    if foreign_pub {
+                        foreign_topics.insert(name.clone());
+                    }
 
                     // Spawn a per-topic sample forwarder. Uses subscribe_raw
                     // for accurate wire-byte counts; field decoding is a v0.2
@@ -161,9 +195,11 @@ fn spin_loop(
                     if let Ok(stream) = node.subscribe_raw(name, ty, r2r::QosProfile::default()) {
                         let name_owned = name.clone();
                         let tx = event_tx.clone();
+                        let counter = samples_received.clone();
                         let _ = spawner.spawn_local(async move {
                             let mut stream = stream;
                             while let Some(bytes) = stream.next().await {
+                                counter.fetch_add(1, Ordering::Relaxed);
                                 if tx
                                     .send(BackendEvent::Sample {
                                         name: name_owned.clone(),
@@ -188,6 +224,7 @@ fn spin_loop(
                     .collect();
                 for name in gone {
                     known.remove(&name);
+                    foreign_topics.remove(&name);
                     let _ = event_tx.send(BackendEvent::TopicRemoved(name));
                     // Sample task for this topic will exit on next Sample failure or remain dormant.
                 }
@@ -196,7 +233,40 @@ fn spin_loop(
 
         node.spin_once(SPIN_TICK);
         pool.run_until_stalled();
+
+        if !init_sent && Instant::now() >= probe_deadline {
+            init_sent = true;
+            let samples = samples_received.load(Ordering::Relaxed);
+            if !foreign_topics.is_empty() && samples == 0 {
+                let _ = init_tx.send(Err(peer_mismatch_error(&foreign_topics)));
+                return;
+            }
+            let _ = init_tx.send(Ok(()));
+        }
     }
+}
+
+fn peer_mismatch_error(foreign_topics: &HashSet<String>) -> anyhow::Error {
+    let count = foreign_topics.len();
+    let mut preview: Vec<&str> = foreign_topics.iter().take(5).map(String::as_str).collect();
+    preview.sort_unstable();
+    let extra = count.saturating_sub(preview.len());
+    let extra_str = if extra > 0 {
+        format!(" (+{extra} more)")
+    } else {
+        String::new()
+    };
+    let plural = if count == 1 { "" } else { "s" };
+    let probe_secs = PROBE_DURATION.as_secs();
+    let topics = preview.join(", ");
+    anyhow::anyhow!(
+        "Discovered {count} foreign-published topic{plural} but received zero samples in {probe_secs}s. \
+         This is the signature of a ROS 2 distro or RMW mismatch: rostop is a jazzy + rmw_cyclonedds_cpp \
+         participant, and peers on a different distro (Humble, Iron) or RMW (rmw_fastrtps_cpp) trigger \
+         CDR decode failures (\"sequence size exceeds remaining buffer\" on the robot side). \
+         Topics seen: {topics}{extra_str}. \
+         Rebuild rostop against the target distro / RMW, or set {SKIP_PROBE_ENV}=1 to bypass."
+    )
 }
 
 #[cfg(test)]

@@ -49,6 +49,38 @@ just run --demo           # launches the TUI with a fabricated 6-topic system
 
 If `cargo` + ROS 2 Jazzy are already installed locally, plain `cargo run -- --demo` works too — Docker is just for reproducibility.
 
+### Running against a real ROS 2 system
+
+The `just run-live` recipe launches the container with `--network=host` and `--ipc=host`, so DDS discovery reaches the topics on your robot or workstation just like a native install would.
+
+```bash
+just run-live              # uses host's ROS_DOMAIN_ID + RMW
+just run-live --some-flag  # extra args forwarded to the rostop binary
+```
+
+Environment variables (read from the calling shell, forwarded into the container):
+
+| Variable             | Default               | Notes                                                                                       |
+| -------------------- | --------------------- | ------------------------------------------------------------------------------------------- |
+| `ROS_DOMAIN_ID`      | `0`                   | Must match the system you want to observe.                                                  |
+| `RMW_IMPLEMENTATION` | `rmw_cyclonedds_cpp`  | Set to match the host's DDS vendor. The image ships CycloneDDS; Fast DDS would need a rebuild. |
+| `CYCLONEDDS_URI`     | unset                 | Optional. Path/inline XML for a CycloneDDS config — needed only if you require unicast peers or non-default interfaces. |
+| `ROS_LOCALHOST_ONLY` | `0`                   | Set to `1` to restrict discovery to localhost (useful for testing on the same machine).     |
+
+Caveats:
+
+- `--network=host` is Linux-only. On macOS / Windows Docker Desktop, host networking does not bridge to the LAN; use a native install or run the container inside a Linux VM that's on the robot's network.
+- If your host runs Fast DDS and you can't switch it to CycloneDDS, change `RMW_IMPLEMENTATION` *and* install the matching `ros-jazzy-rmw-fastrtps-cpp` package in the Dockerfile.
+- Multicast must reach between host and target. Different subnets / restrictive switches break discovery — fall back to `CYCLONEDDS_URI` with explicit unicast peers.
+
+Sanity check from inside the container (`just shell`, then):
+
+```bash
+ros2 topic list   # should show the topics your robot is publishing
+```
+
+If that's empty, rostop will be empty too — fix discovery first.
+
 ## Keybindings
 
 | Key            | Action                            |

@@ -113,14 +113,14 @@ If that's empty, rostop will be empty too — fix discovery first.
             │                                             │
    ┌────────▼─────────┐                       ┌───────────▼──────────┐
    │   DemoBackend    │                       │     LiveBackend      │
-   │ (always works,   │                       │ (r2r / rclrs, runs   │
-   │  no ROS install) │                       │  next to a real      │
-   │                  │                       │  ROS 2 system)       │
+   │ (always works,   │                       │ (r2r, runs next to a │
+   │  no ROS install) │                       │  real ROS 2 system,  │
+   │                  │                       │  `--features live`)  │
    └──────────────────┘                       └──────────────────────┘
 ```
 
 - `crates/rostop-core` — pure-logic primitives. No ROS dependency. 25 unit tests cover Hz / BW / jitter computation, sample eviction, registry CRUD + sort + filter, sparkline rendering, and dynamic message tree flattening.
-- `crates/rostop-cli` — the binary. ratatui rendering, key handling, demo backend, and the integration test that renders to a `TestBackend` buffer and asserts the topic table contains expected strings.
+- `crates/rostop-cli` — the binary. ratatui rendering, key handling, demo backend, and (gated behind the `live` cargo feature) the r2r-backed `LiveBackend` plus integration tests that drive `ros2 topic pub` against it.
 
 ## Test summary
 
@@ -130,13 +130,14 @@ crates/rostop-cli     8 unit tests   demo backend, table row builder, fmt helper
 crates/rostop-cli     2 integration  full app + render → TestBackend buffer
                                      ───
                                      35 tests, all green
+crates/rostop-cli   + 3 live tests   ros2 topic pub → LiveBackend (--features live)
 ```
 
 Run them yourself with `just test` (Docker) or `cargo test --workspace` (local).
 
 ## Roadmap
 
-- **Live ROS 2 backend** via [`r2r`](https://github.com/sequenceplanner/r2r) — graph discovery, dynamic subscription with runtime introspection, no message codegen needed. The `RosBackend` trait is already in place; only the live impl is missing.
+- **Field-level inspector for live topics** — v0.1.0 uses `subscribe_raw` for accurate Hz/BW/jitter without per-message decode cost. The inspector pane shows `DynamicValue::Bytes(len)` for live topics; on-demand decoded subscription for the currently selected topic is the next step.
 - **Recording / replay** — `:rec <topic>` writes a small `.mcap` from selected topics.
 - **Service caller & param editor** panes (`F2` / `F3`).
 - **Node-graph mini-map** showing the live pub→sub graph for the selected topic, inspired by `rqt_graph` but live and animated.

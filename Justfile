@@ -47,7 +47,7 @@ run-live *args:
       -v rostop-target:/work/target \
       -w /work \
       rostop-dev:latest \
-      bash -lc "source /opt/ros/jazzy/setup.bash && cargo run -p rostop-cli -- {{args}}"
+      bash -lc "source /opt/ros/jazzy/setup.bash && cargo run -p rostop-cli --features live -- {{args}}"
 
 # Format
 fmt:

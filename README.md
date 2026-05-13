@@ -49,31 +49,48 @@ just run --demo           # launches the TUI with a fabricated 6-topic system
 
 If `cargo` + ROS 2 Jazzy are already installed locally, plain `cargo run -- --demo` works too — Docker is just for reproducibility.
 
+### Which build do I need?
+
+`r2r` (rostop's ROS 2 client library) links against the system `rcl`/`rmw` headers at build time, so the binary is locked to one ROS 2 distro and one RMW. To talk to a robot you need a rostop build that matches it:
+
+| Robot runs                       | Use this                                  |
+| -------------------------------- | ----------------------------------------- |
+| Jazzy + CycloneDDS               | `just run-live` (default — `Dockerfile`)        |
+| Humble + Fast DDS                | `just run-live-humble` (`Dockerfile.humble`)    |
+| something else                   | add a `Dockerfile.<distro>` and a matching recipe |
+
+Same source tree, different build container. `scripts/dev.sh` picks the right Dockerfile / image tag / `setup.bash` based on `ROSTOP_DISTRO` (default `jazzy`); each distro gets its own `target/` volume so cached artifacts don't collide. The compiled binary stamps `ROS_DISTRO` and `RMW_IMPLEMENTATION` from the build env (`build.rs`) and quotes them back in error messages, so you can tell which build you're holding without running `--version`.
+
 ### Running against a real ROS 2 system
 
-The `just run-live` recipe launches the container with `--network=host` and `--ipc=host`, so DDS discovery reaches the topics on your robot or workstation just like a native install would.
+The `just run-live` / `just run-live-humble` recipes launch the container with `--network=host` and `--ipc=host`, so DDS discovery reaches the topics on your robot or workstation just like a native install would.
 
 ```bash
+# Jazzy (CycloneDDS) — default
 just run-live              # uses host's ROS_DOMAIN_ID + RMW
 just run-live --some-flag  # extra args forwarded to the rostop binary
+
+# Humble (Fast DDS)
+just run-live-humble
 ```
 
 Environment variables (read from the calling shell, forwarded into the container):
 
-| Variable             | Default               | Notes                                                                                       |
-| -------------------- | --------------------- | ------------------------------------------------------------------------------------------- |
-| `ROS_DOMAIN_ID`      | `0`                   | Must match the system you want to observe.                                                  |
-| `RMW_IMPLEMENTATION` | `rmw_cyclonedds_cpp`  | Set to match the host's DDS vendor. The image ships CycloneDDS; Fast DDS would need a rebuild. |
-| `CYCLONEDDS_URI`     | unset                 | Optional. Path/inline XML for a CycloneDDS config — needed only if you require unicast peers or non-default interfaces. |
-| `ROS_LOCALHOST_ONLY` | `0`                   | Set to `1` to restrict discovery to localhost (useful for testing on the same machine).     |
+| Variable                 | Default (Jazzy)       | Default (Humble)        | Notes                                                                                       |
+| ------------------------ | --------------------- | ----------------------- | ------------------------------------------------------------------------------------------- |
+| `ROS_DOMAIN_ID`          | `0`                   | `0`                     | Must match the system you want to observe.                                                  |
+| `RMW_IMPLEMENTATION`     | `rmw_cyclonedds_cpp`  | `rmw_fastrtps_cpp`      | Set to match the host's DDS vendor.                                                         |
+| `CYCLONEDDS_URI`         | unset                 | n/a                     | Optional. Path/inline XML for a CycloneDDS config — needed only if you require unicast peers or non-default interfaces. |
+| `ROS_LOCALHOST_ONLY`     | `0`                   | `0`                     | Set to `1` to restrict discovery to localhost (useful for testing on the same machine).     |
+| `ROSTOP_SKIP_PEER_PROBE` | unset                 | unset                   | Set to `1` to skip the 2 s startup peer probe (useful when peers are slow to come up).      |
 
 Caveats:
 
 - `--network=host` is Linux-only. On macOS / Windows Docker Desktop, host networking does not bridge to the LAN; use a native install or run the container inside a Linux VM that's on the robot's network.
-- If your host runs Fast DDS and you can't switch it to CycloneDDS, change `RMW_IMPLEMENTATION` *and* install the matching `ros-jazzy-rmw-fastrtps-cpp` package in the Dockerfile.
-- Multicast must reach between host and target. Different subnets / restrictive switches break discovery — fall back to `CYCLONEDDS_URI` with explicit unicast peers.
+- Cross-distro / cross-RMW peers don't work — the peer probe will refuse to start with a diagnostic naming the build target. Pick the matching recipe instead of overriding `RMW_IMPLEMENTATION`.
+- Multicast must reach between host and target. Different subnets / restrictive switches break discovery — fall back to `CYCLONEDDS_URI` with explicit unicast peers (Jazzy) or a similar Fast DDS peer-list XML (Humble).
 
-Sanity check from inside the container (`just shell`, then):
+Sanity check from inside the container (`just shell` / `just shell-humble`, then):
 
 ```bash
 ros2 topic list   # should show the topics your robot is publishing

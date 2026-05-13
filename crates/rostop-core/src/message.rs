@@ -86,5 +86,105 @@ fn scalar_to_string(v: &DynamicValue) -> String {
     }
 }
 
+/// One row at a single drill level (direct children of the current path).
+///
+/// Unlike `TreeRow`, this representation is non-recursive: a container child
+/// is shown as a single summary row with `has_children = true`, never expanded.
+/// Drill-down navigation in the UI selects one of these rows to descend into.
+#[derive(Debug, Clone, PartialEq)]
+pub struct LevelRow {
+    pub name: String,
+    pub value_text: String,
+    pub has_children: bool,
+}
+
+/// Resolve `path` against `root`, returning the value at that depth.
+///
+/// Each path entry is the index of a field (for `Struct`) or element (for
+/// `Array`) at the corresponding level. Returns `None` if any index is out of
+/// bounds or the value at that level is a scalar.
+pub fn resolve_path<'a>(root: &'a DynamicValue, path: &[usize]) -> Option<&'a DynamicValue> {
+    let mut cur = root;
+    for &i in path {
+        cur = match cur {
+            DynamicValue::Struct(fields) => fields.get(i).map(|(_, v)| v)?,
+            DynamicValue::Array(items) => items.get(i)?,
+            _ => return None,
+        };
+    }
+    Some(cur)
+}
+
+/// Direct children of the value at `path`, formatted for one level of display.
+///
+/// If `path` resolves to a scalar (or is invalid), returns an empty vector —
+/// the caller should treat that as "nothing to drill into".
+pub fn level_rows(root: &DynamicValue, path: &[usize]) -> Vec<LevelRow> {
+    let Some(v) = resolve_path(root, path) else {
+        return Vec::new();
+    };
+    match v {
+        DynamicValue::Struct(fields) => fields
+            .iter()
+            .map(|(name, child)| LevelRow {
+                name: name.clone(),
+                value_text: summarize(child),
+                has_children: is_container(child),
+            })
+            .collect(),
+        DynamicValue::Array(items) => items
+            .iter()
+            .enumerate()
+            .map(|(i, child)| LevelRow {
+                name: format!("[{i}]"),
+                value_text: summarize(child),
+                has_children: is_container(child),
+            })
+            .collect(),
+        _ => Vec::new(),
+    }
+}
+
+/// Breadcrumb segments labelling each step of `path` from `root`.
+///
+/// For a struct step the segment is the field name; for an array step it is
+/// `[i]`. Stops early if the path runs into a scalar or out-of-bounds index.
+pub fn path_segments(root: &DynamicValue, path: &[usize]) -> Vec<String> {
+    let mut out = Vec::with_capacity(path.len());
+    let mut cur = root;
+    for &i in path {
+        match cur {
+            DynamicValue::Struct(fields) => match fields.get(i) {
+                Some((name, child)) => {
+                    out.push(name.clone());
+                    cur = child;
+                }
+                None => break,
+            },
+            DynamicValue::Array(items) => match items.get(i) {
+                Some(child) => {
+                    out.push(format!("[{i}]"));
+                    cur = child;
+                }
+                None => break,
+            },
+            _ => break,
+        }
+    }
+    out
+}
+
+fn is_container(v: &DynamicValue) -> bool {
+    matches!(v, DynamicValue::Struct(_) | DynamicValue::Array(_))
+}
+
+fn summarize(v: &DynamicValue) -> String {
+    match v {
+        DynamicValue::Struct(fields) => format!("{{{} fields}}", fields.len()),
+        DynamicValue::Array(items) => format!("[{}]", items.len()),
+        scalar => scalar_to_string(scalar),
+    }
+}
+
 #[cfg(test)]
 mod tests;

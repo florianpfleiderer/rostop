@@ -5,9 +5,9 @@ use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Cell, Paragraph, Row, Table};
 use ratatui::Frame;
-use rostop_core::message::{flatten_rows, DynamicValue};
+use rostop_core::message::{level_rows, path_segments};
 
-use crate::app::App;
+use crate::app::{App, Focus};
 use crate::ui::rows::{fmt_bps, TopicTableRow};
 
 pub fn render(f: &mut Frame, app: &App, rows: &[TopicTableRow]) {
@@ -37,15 +37,23 @@ fn render_topic_table(f: &mut Frame, area: Rect, app: &App, rows: &[TopicTableRo
     .style(Style::default().fg(Color::Black).bg(Color::Cyan))
     .height(1);
 
+    let focused = app.focus == Focus::Topics;
     let table_rows: Vec<Row> = rows
         .iter()
         .enumerate()
         .map(|(i, r)| {
             let selected = i == app.selected;
-            let style = if selected {
+            let style = if selected && focused {
                 Style::default()
                     .fg(Color::Black)
                     .bg(Color::Yellow)
+                    .add_modifier(Modifier::BOLD)
+            } else if selected {
+                // Dim cursor so the user still sees where they are when focus
+                // is in the inspector pane.
+                Style::default()
+                    .fg(Color::Black)
+                    .bg(Color::DarkGray)
                     .add_modifier(Modifier::BOLD)
             } else {
                 Style::default()
@@ -72,13 +80,26 @@ fn render_topic_table(f: &mut Frame, area: Rect, app: &App, rows: &[TopicTableRo
         Constraint::Length(6),
     ];
     let table = Table::new(table_rows, widths).header(header).block(
-        Block::default().borders(Borders::ALL).title(format!(
-            " rostop ─ {} ─ {} topics ",
-            app.backend.label(),
-            rows.len()
-        )),
+        Block::default()
+            .borders(Borders::ALL)
+            .border_style(border_style(focused))
+            .title(format!(
+                " rostop ─ {} ─ {} topics ",
+                app.backend.label(),
+                rows.len()
+            )),
     );
     f.render_widget(table, area);
+}
+
+fn border_style(focused: bool) -> Style {
+    if focused {
+        Style::default()
+            .fg(Color::Yellow)
+            .add_modifier(Modifier::BOLD)
+    } else {
+        Style::default().fg(Color::DarkGray)
+    }
 }
 
 fn render_bottom(f: &mut Frame, area: Rect, app: &App, rows: &[TopicTableRow]) {
@@ -91,48 +112,96 @@ fn render_bottom(f: &mut Frame, area: Rect, app: &App, rows: &[TopicTableRow]) {
 }
 
 fn render_inspector(f: &mut Frame, area: Rect, app: &App, rows: &[TopicTableRow]) {
+    let focused = app.focus == Focus::Inspector;
     let selected_name = rows.get(app.selected).map(|r| r.name.clone());
-    let title = match &selected_name {
-        Some(n) => format!(" inspector ─ {n} "),
-        None => " inspector ".into(),
+    let message = selected_name.as_ref().and_then(|n| app.last_message.get(n));
+
+    let breadcrumb = match (&selected_name, message) {
+        (Some(n), Some(msg)) => {
+            let segs = path_segments(msg, &app.inspector_path);
+            if segs.is_empty() {
+                format!(" inspector ─ {n} ")
+            } else {
+                format!(" inspector ─ {n} > {} ", segs.join(" > "))
+            }
+        }
+        (Some(n), None) => format!(" inspector ─ {n} "),
+        _ => " inspector ".into(),
     };
-    let lines: Vec<Line> = match selected_name.as_ref().and_then(|n| app.last_message.get(n)) {
-        Some(value) => render_message_lines(value),
+
+    let lines: Vec<Line> = match message {
+        Some(value) => {
+            let level = level_rows(value, &app.inspector_path);
+            if level.is_empty() {
+                vec![Line::from(Span::styled(
+                    "  (no fields at this level)",
+                    Style::default().fg(Color::DarkGray),
+                ))]
+            } else {
+                level
+                    .into_iter()
+                    .enumerate()
+                    .map(|(i, r)| render_level_line(i, r, focused, app.inspector_selected))
+                    .collect()
+            }
+        }
         None => vec![Line::from(Span::styled(
             "  (no message yet)",
             Style::default().fg(Color::DarkGray),
         ))],
     };
-    let para = Paragraph::new(lines).block(Block::default().borders(Borders::ALL).title(title));
+    let para = Paragraph::new(lines).block(
+        Block::default()
+            .borders(Borders::ALL)
+            .border_style(border_style(focused))
+            .title(breadcrumb),
+    );
     f.render_widget(para, area);
 }
 
-fn render_message_lines(v: &DynamicValue) -> Vec<Line<'static>> {
-    let rows = flatten_rows(v);
-    rows.into_iter()
-        .map(|r| {
-            let indent = "  ".repeat(r.depth as usize);
-            let bullet = if r.has_children { "▾" } else { "·" };
-            let name_style = if r.has_children {
-                Style::default()
-                    .fg(Color::Cyan)
-                    .add_modifier(Modifier::BOLD)
-            } else {
-                Style::default().fg(Color::White)
-            };
-            let value_style = Style::default().fg(Color::Green);
-            let mut spans = vec![
-                Span::raw(indent),
-                Span::styled(format!("{bullet} "), Style::default().fg(Color::DarkGray)),
-                Span::styled(r.name, name_style),
-            ];
-            if !r.value_text.is_empty() {
-                spans.push(Span::raw(": "));
-                spans.push(Span::styled(r.value_text, value_style));
-            }
-            Line::from(spans)
-        })
-        .collect()
+fn render_level_line(
+    i: usize,
+    r: rostop_core::message::LevelRow,
+    focused: bool,
+    selected: usize,
+) -> Line<'static> {
+    let is_sel = i == selected;
+    let bullet = if r.has_children { "▸" } else { "·" };
+    let mut name_style = if r.has_children {
+        Style::default()
+            .fg(Color::Cyan)
+            .add_modifier(Modifier::BOLD)
+    } else {
+        Style::default().fg(Color::White)
+    };
+    let mut value_style = Style::default().fg(Color::Green);
+    let mut bullet_style = Style::default().fg(Color::DarkGray);
+    if is_sel && focused {
+        let sel = Style::default()
+            .fg(Color::Black)
+            .bg(Color::Yellow)
+            .add_modifier(Modifier::BOLD);
+        name_style = sel;
+        value_style = sel;
+        bullet_style = sel;
+    } else if is_sel {
+        let dim = Style::default()
+            .fg(Color::Black)
+            .bg(Color::DarkGray)
+            .add_modifier(Modifier::BOLD);
+        name_style = dim;
+        value_style = dim;
+        bullet_style = dim;
+    }
+    let mut spans = vec![
+        Span::styled(format!(" {bullet} "), bullet_style),
+        Span::styled(r.name, name_style),
+    ];
+    if !r.value_text.is_empty() {
+        spans.push(Span::styled(": ", value_style));
+        spans.push(Span::styled(r.value_text, value_style));
+    }
+    Line::from(spans)
 }
 
 fn render_sparklines(f: &mut Frame, area: Rect, app: &App, rows: &[TopicTableRow]) {
@@ -203,7 +272,12 @@ fn render_status_bar(f: &mut Frame, area: Rect, app: &App) {
         "[LIVE]".to_string()
     };
     let sort = format!("sort:{:?} {:?}", app.sort_key, app.sort_order);
-    let help = "j/k:move  /:filter  s:sort  r:reverse  p:pause  g/G:top/bot  q:quit";
+    let help = match app.focus {
+        Focus::Topics => {
+            "j/k:move  l:inspect  /:filter  s:sort  r:reverse  p:pause  g/G:top/bot  q:quit"
+        }
+        Focus::Inspector => "j/k:move  l:drill-in  h:drill-out/back  g/G:top/bot  p:pause  q:quit",
+    };
     let line = Line::from(vec![
         Span::styled(
             mode,

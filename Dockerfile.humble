@@ -14,7 +14,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
       clang libclang-dev cmake python3-pip python3-colcon-common-extensions \
       ros-humble-std-msgs ros-humble-sensor-msgs \
       ros-humble-geometry-msgs ros-humble-nav-msgs ros-humble-diagnostic-msgs \
-      ros-humble-tf2-msgs \
+      ros-humble-tf2-msgs ros-humble-control-msgs \
+      ros-humble-trajectory-msgs ros-humble-lifecycle-msgs \
+      ros-humble-rcl-interfaces ros-humble-realsense2-camera-msgs \
     && rm -rf /var/lib/apt/lists/*
 
 RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \

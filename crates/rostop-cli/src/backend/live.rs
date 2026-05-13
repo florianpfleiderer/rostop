@@ -8,9 +8,11 @@
 //! `futures::executor::LocalPool`. It loops over `node.spin_once` +
 //! `pool.run_until_stalled`, polling the ROS graph on a 500 ms cadence and
 //! forwarding events to the UI thread over an `std::sync::mpsc` channel.
-//! Sample bytes come from `subscribe_raw` (no JSON decode — accurate Hz/BW,
-//! `DynamicValue::Bytes(len)` payload). Field-level inspection of live topics
-//! is a v0.2 item.
+//! Wire bytes come from `subscribe_raw` (accurate Hz/BW). Each sample is
+//! decoded for field inspection via `r2r::WrappedNativeMsgUntyped` —
+//! deserialising the CDR payload into a `serde_json::Value` that is then
+//! mapped to [`DynamicValue`]. On decode failure (e.g. type-support not
+//! available) we fall back to `DynamicValue::Bytes(len)`.
 
 use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -189,21 +191,25 @@ fn spin_loop(
                     }
 
                     // Spawn a per-topic sample forwarder. Uses subscribe_raw
-                    // for accurate wire-byte counts; field decoding is a v0.2
-                    // item, so the payload is DynamicValue::Bytes(len).
+                    // for accurate wire-byte counts, then decodes the CDR
+                    // payload to a DynamicValue via WrappedNativeMsgUntyped.
                     if let Ok(stream) = node.subscribe_raw(name, ty, r2r::QosProfile::default()) {
                         let name_owned = name.clone();
+                        let ty_owned = ty.clone();
                         let tx = event_tx.clone();
                         let counter = samples_received.clone();
                         let _ = spawner.spawn_local(async move {
                             let mut stream = stream;
+                            let mut decoder =
+                                r2r::WrappedNativeMsgUntyped::new_from(&ty_owned).ok();
                             while let Some(bytes) = stream.next().await {
                                 counter.fetch_add(1, Ordering::Relaxed);
+                                let value = decode_sample(decoder.as_mut(), &bytes);
                                 if tx
                                     .send(BackendEvent::Sample {
                                         name: name_owned.clone(),
                                         bytes: bytes.len() as u32,
-                                        value: DynamicValue::Bytes(bytes.len()),
+                                        value,
                                         at: Instant::now(),
                                     })
                                     .is_err()
@@ -245,6 +251,52 @@ fn spin_loop(
     }
 }
 
+/// Decode one raw CDR sample into a `DynamicValue`.
+///
+/// Returns `DynamicValue::Bytes(len)` if the decoder is missing (type support
+/// not available at build time) or any step of the decode fails — keeps the
+/// row visible in the inspector with at least the wire size.
+fn decode_sample(decoder: Option<&mut r2r::WrappedNativeMsgUntyped>, bytes: &[u8]) -> DynamicValue {
+    if let Some(d) = decoder {
+        if d.from_serialized_bytes(bytes).is_ok() {
+            if let Ok(json) = d.to_json() {
+                return json_to_dynamic(json);
+            }
+        }
+    }
+    DynamicValue::Bytes(bytes.len())
+}
+
+/// Map a `serde_json::Value` produced by `WrappedNativeMsgUntyped::to_json`
+/// onto the structural `DynamicValue` shape the inspector renders.
+fn json_to_dynamic(v: serde_json::Value) -> DynamicValue {
+    use serde_json::Value;
+    match v {
+        Value::Null => DynamicValue::Str("null".into()),
+        Value::Bool(b) => DynamicValue::Bool(b),
+        Value::Number(n) => {
+            if let Some(i) = n.as_i64() {
+                DynamicValue::I64(i)
+            } else if let Some(u) = n.as_u64() {
+                DynamicValue::U64(u)
+            } else if let Some(f) = n.as_f64() {
+                DynamicValue::F64(f)
+            } else {
+                DynamicValue::Str(n.to_string())
+            }
+        }
+        Value::String(s) => DynamicValue::Str(s),
+        Value::Array(items) => {
+            DynamicValue::Array(items.into_iter().map(json_to_dynamic).collect())
+        }
+        Value::Object(map) => DynamicValue::Struct(
+            map.into_iter()
+                .map(|(k, v)| (k, json_to_dynamic(v)))
+                .collect(),
+        ),
+    }
+}
+
 fn peer_mismatch_error(foreign_topics: &HashSet<String>) -> anyhow::Error {
     let count = foreign_topics.len();
     let mut preview: Vec<&str> = foreign_topics.iter().take(5).map(String::as_str).collect();
@@ -275,6 +327,42 @@ fn peer_mismatch_error(foreign_topics: &HashSet<String>) -> anyhow::Error {
 mod tests {
     use super::*;
     use std::process::{Child, Command, Stdio};
+
+    #[test]
+    fn json_to_dynamic_maps_a_joint_state_shape() {
+        // Mirrors the `sensor_msgs/msg/JointState` payload reported in the
+        // wild: header struct, parallel arrays of names / positions /
+        // velocities / efforts. The whole tree must come through as a
+        // Struct with nested Arrays — not collapsed into DynamicValue::Bytes.
+        let raw = serde_json::json!({
+            "header": { "stamp": { "sec": 1, "nanosec": 2 }, "frame_id": "base_link" },
+            "name": ["a", "b"],
+            "position": [0.1, 0.2],
+            "velocity": [-0.001, 0.0],
+            "effort": [0.058, -0.012],
+        });
+        let v = json_to_dynamic(raw);
+        let DynamicValue::Struct(fields) = &v else {
+            panic!("expected Struct, got {v:?}");
+        };
+        let keys: Vec<&str> = fields.iter().map(|(k, _)| k.as_str()).collect();
+        assert!(keys.contains(&"header"));
+        assert!(keys.contains(&"name"));
+        assert!(keys.contains(&"position"));
+        let position = fields.iter().find(|(k, _)| k == "position").unwrap();
+        let DynamicValue::Array(items) = &position.1 else {
+            panic!("position should be an array");
+        };
+        assert_eq!(items.len(), 2);
+        assert!(matches!(items[0], DynamicValue::F64(_)));
+    }
+
+    #[test]
+    fn decode_sample_falls_back_to_bytes_when_no_decoder() {
+        let payload = [1u8, 2, 3, 4];
+        let v = decode_sample(None, &payload);
+        assert_eq!(v, DynamicValue::Bytes(4));
+    }
 
     #[test]
     fn new_succeeds_and_label_is_live() {

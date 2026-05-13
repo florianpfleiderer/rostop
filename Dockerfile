@@ -10,7 +10,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
       clang libclang-dev cmake python3-pip python3-colcon-common-extensions \
       ros-jazzy-rmw-cyclonedds-cpp ros-jazzy-std-msgs ros-jazzy-sensor-msgs \
       ros-jazzy-geometry-msgs ros-jazzy-nav-msgs ros-jazzy-diagnostic-msgs \
-      ros-jazzy-tf2-msgs \
+      ros-jazzy-tf2-msgs ros-jazzy-control-msgs \
+      ros-jazzy-trajectory-msgs ros-jazzy-lifecycle-msgs \
+      ros-jazzy-rcl-interfaces ros-jazzy-realsense2-camera-msgs \
     && rm -rf /var/lib/apt/lists/*
 
 RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \

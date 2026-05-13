@@ -4,6 +4,17 @@ All notable changes to rostop are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+
+- Live backend now decodes message payloads via `r2r::WrappedNativeMsgUntyped`,
+  so the inspector pane shows the actual field tree (header, arrays, nested
+  structs) for live topics instead of a single `DynamicValue::Bytes(len)`
+  scalar. Wire-byte counts still come from `subscribe_raw`, so Hz / BW /
+  jitter remain accurate. Topics whose message type was not linked in at
+  build time fall back to the previous `Bytes(len)` placeholder.
+
 ## [0.1.0] - 2026-05-13
 
 First public release. Inspect a live ROS 2 graph from the terminal.

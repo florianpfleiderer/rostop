@@ -182,7 +182,6 @@ Run them yourself with `just test` (Docker) or `cargo test --workspace` (local).
 
 ## Roadmap
 
-- **Field-level inspector for live topics** — v0.1.0 uses `subscribe_raw` for accurate Hz/BW/jitter without per-message decode cost. The inspector pane shows `DynamicValue::Bytes(len)` for live topics; on-demand decoded subscription for the currently selected topic is the next step.
 - **Recording / replay** — `:rec <topic>` writes a small `.mcap` from selected topics.
 - **Service caller & param editor** panes (`F2` / `F3`).
 - **Node-graph mini-map** showing the live pub→sub graph for the selected topic, inspired by `rqt_graph` but live and animated.

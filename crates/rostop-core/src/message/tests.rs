@@ -73,6 +73,24 @@ fn bytes_field_renders_as_size_hint() {
     assert!(!rows[0].has_children);
 }
 
+#[test]
+fn array_elided_renders_as_count_hint_and_is_not_drillable() {
+    let v = DynamicValue::Struct(vec![("ranges".into(), DynamicValue::ArrayElided(1_080))]);
+    let rows = flatten_rows(&v);
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].name, "ranges");
+    assert_eq!(rows[0].value_text, "[1080 items, elided]");
+    assert!(!rows[0].has_children, "elided arrays must not be drillable");
+
+    // Also confirm the level-row view and path resolution treat it as a leaf.
+    let level = level_rows(&v, &[]);
+    assert_eq!(level.len(), 1);
+    assert!(!level[0].has_children);
+    assert_eq!(level[0].value_text, "[1080 items, elided]");
+    // Drilling into an elided array yields no children.
+    assert!(level_rows(&v, &[0]).is_empty());
+}
+
 fn tf_like_message() -> DynamicValue {
     DynamicValue::Struct(vec![(
         "transforms".into(),

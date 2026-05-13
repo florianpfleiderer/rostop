@@ -1,8 +1,14 @@
 name: Release
 
-# Cuts a tarball release for ROS 2 Jazzy on x86_64.
+# Cuts release artifacts (tarball + .deb) for ROS 2 Humble and Jazzy on x86_64.
 # Trigger by pushing a tag like `v0.1.0`:
 #   git tag v0.1.0 && git push origin v0.1.0
+#
+# Each distro produces:
+#   * rostop-<version>-<distro>-x86_64.tar.gz  (bare binary, README, LICENSE)
+#   * rostop-<distro>_<version>-1_amd64.deb   (declares ros-<distro>-* deps)
+# Both are built with `--features live` against the matching `ros:<distro>-ros-base`
+# image, so the binary links the right `rcl` / `rmw` / message-package shared libs.
 on:
   push:
     tags: ['v*']
@@ -17,54 +23,103 @@ permissions:
 
 jobs:
   build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - distro: humble
+            image: ros:humble-ros-base
+            # rmw_fastrtps_cpp is Humble's default; do not install cyclonedds here.
+            extra_ros_pkgs: ""
+          - distro: jazzy
+            image: ros:jazzy-ros-base
+            extra_ros_pkgs: "ros-jazzy-rmw-cyclonedds-cpp"
     runs-on: ubuntu-latest
     container:
-      image: ros:jazzy-ros-base
+      image: ${{ matrix.image }}
     steps:
       - uses: actions/checkout@v4
         with:
           ref: ${{ inputs.tag || github.ref }}
 
       - name: Install system deps
+        shell: bash
         run: |
+          set -euxo pipefail
           apt-get update
           apt-get install -y --no-install-recommends \
             curl ca-certificates build-essential pkg-config git \
-            clang libclang-dev cmake
+            clang libclang-dev cmake python3-pip python3-colcon-common-extensions \
+            ros-${{ matrix.distro }}-std-msgs \
+            ros-${{ matrix.distro }}-sensor-msgs \
+            ros-${{ matrix.distro }}-geometry-msgs \
+            ros-${{ matrix.distro }}-nav-msgs \
+            ros-${{ matrix.distro }}-diagnostic-msgs \
+            ros-${{ matrix.distro }}-tf2-msgs \
+            ros-${{ matrix.distro }}-control-msgs \
+            ros-${{ matrix.distro }}-trajectory-msgs \
+            ros-${{ matrix.distro }}-lifecycle-msgs \
+            ros-${{ matrix.distro }}-rcl-interfaces \
+            ros-${{ matrix.distro }}-realsense2-camera-msgs \
+            ${{ matrix.extra_ros_pkgs }}
 
       - name: Install Rust 1.88
+        shell: bash
         run: |
           curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | \
             sh -s -- -y --default-toolchain 1.88.0 --profile minimal
           echo "$HOME/.cargo/bin" >> $GITHUB_PATH
 
-      - name: cargo build --release
-        run: cargo build --release -p rostop-cli
+      - name: Install cargo-deb
+        shell: bash
+        run: cargo install cargo-deb --locked --version ^2
+
+      - name: cargo build --release --features live
+        shell: bash
+        run: |
+          source /opt/ros/${{ matrix.distro }}/setup.bash
+          cargo build --release -p rostop-cli --features live
+
+      - name: cargo deb (variant = ${{ matrix.distro }})
+        shell: bash
+        run: |
+          # --no-build: reuse the binary we just produced at target/release/rostop.
+          # The `--features live` from the build step has already been baked in.
+          mkdir -p dist
+          cargo deb \
+            --variant ${{ matrix.distro }} \
+            -p rostop-cli \
+            --no-build \
+            --output dist/
 
       - name: Package tarball
         id: package
+        shell: bash
         run: |
-          set -euo pipefail
-          VERSION="${GITHUB_REF_NAME#v}"
-          [ -n "${{ inputs.tag }}" ] && VERSION="${{ inputs.tag }}" && VERSION="${VERSION#v}"
-          NAME="rostop-${VERSION}-jazzy-x86_64"
+          set -euxo pipefail
+          # Strip the leading `v` from the tag to match Cargo.toml's version.
+          REF="${{ inputs.tag || github.ref_name }}"
+          VERSION="${REF#v}"
+          NAME="rostop-${VERSION}-${{ matrix.distro }}-x86_64"
           mkdir -p "dist/${NAME}"
           cp target/release/rostop "dist/${NAME}/"
           cp README.md "dist/${NAME}/"
-          # LICENSE file is optional — copy if present
+          cp CHANGELOG.md "dist/${NAME}/"
           [ -f LICENSE ] && cp LICENSE "dist/${NAME}/" || true
-          tar -C dist -czf "${NAME}.tar.gz" "${NAME}"
-          sha256sum "${NAME}.tar.gz" > "${NAME}.tar.gz.sha256"
-          echo "tarball=${NAME}.tar.gz" >> "$GITHUB_OUTPUT"
-          echo "checksum=${NAME}.tar.gz.sha256" >> "$GITHUB_OUTPUT"
+          tar -C dist -czf "dist/${NAME}.tar.gz" "${NAME}"
+          (cd dist && sha256sum "${NAME}.tar.gz" > "${NAME}.tar.gz.sha256")
+          # Surface for the publish job — there's also one .deb in dist/.
+          echo "tarball=dist/${NAME}.tar.gz" >> "$GITHUB_OUTPUT"
+          echo "checksum=dist/${NAME}.tar.gz.sha256" >> "$GITHUB_OUTPUT"
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: release-assets
+          name: release-assets-${{ matrix.distro }}
           path: |
-            ${{ steps.package.outputs.tarball }}
-            ${{ steps.package.outputs.checksum }}
+            dist/*.tar.gz
+            dist/*.tar.gz.sha256
+            dist/*.deb
 
   publish:
     needs: build
@@ -76,21 +131,67 @@ jobs:
 
       - uses: actions/download-artifact@v4
         with:
-          name: release-assets
+          pattern: release-assets-*
+          merge-multiple: true
+          path: dist
+
+      - name: Compute combined SHA256SUMS
+        run: |
+          set -euxo pipefail
+          cd dist
+          ls -la
+          # Aggregate sha256 for every release asset so a single file is easy to verify.
+          sha256sum *.tar.gz *.deb > SHA256SUMS
 
       - name: Create GitHub Release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          set -euo pipefail
+          set -euxo pipefail
           TAG="${{ inputs.tag || github.ref_name }}"
+          VERSION="${TAG#v}"
+          REPO="${{ github.repository }}"
+          NOTES_FILE="$(mktemp)"
+          cat > "$NOTES_FILE" <<EOF
+          Prebuilt \`rostop\` binaries with the \`live\` backend enabled.
+
+          | Distro | Ubuntu | Tarball | .deb |
+          | --- | --- | --- | --- |
+          | Humble | 22.04 | rostop-${VERSION}-humble-x86_64.tar.gz | rostop-humble_${VERSION}-1_amd64.deb |
+          | Jazzy  | 24.04 | rostop-${VERSION}-jazzy-x86_64.tar.gz  | rostop-jazzy_${VERSION}-1_amd64.deb  |
+
+          ### Install (Humble / Ubuntu 22.04)
+
+          .deb (recommended — pulls in any missing \`ros-humble-*\` message packages):
+
+          \`\`\`bash
+          curl -L -o rostop-humble.deb \\
+            https://github.com/${REPO}/releases/download/${TAG}/rostop-humble_${VERSION}-1_amd64.deb
+          sudo apt install ./rostop-humble.deb
+          source /opt/ros/humble/setup.bash
+          rostop
+          \`\`\`
+
+          Tarball:
+
+          \`\`\`bash
+          curl -L https://github.com/${REPO}/releases/download/${TAG}/rostop-${VERSION}-humble-x86_64.tar.gz \\
+            | tar -xz
+          install -m755 rostop-${VERSION}-humble-x86_64/rostop ~/.local/bin/
+          source /opt/ros/humble/setup.bash
+          rostop
+          \`\`\`
+
+          ### Install (Jazzy / Ubuntu 24.04)
+
+          Replace \`humble\` with \`jazzy\` in any of the snippets above.
+
+          ### Verifying checksums
+
+          \`SHA256SUMS\` is attached; check with \`sha256sum -c SHA256SUMS\`.
+          EOF
           gh release create "$TAG" \
             --title "$TAG" \
             --generate-notes \
-            --notes "Prebuilt binary for ROS 2 Jazzy on x86_64. Install:
-          \`\`\`bash
-          curl -L https://github.com/${{ github.repository }}/releases/download/${TAG}/rostop-${TAG#v}-jazzy-x86_64.tar.gz | tar -xz
-          install -m755 rostop-${TAG#v}-jazzy-x86_64/rostop ~/.local/bin/
-          \`\`\`
-          Requires ROS 2 Jazzy installed on the host. See README for env-var setup." \
-            *.tar.gz *.sha256
+            --notes-file "$NOTES_FILE" \
+            dist/*.tar.gz dist/*.tar.gz.sha256 dist/*.deb dist/SHA256SUMS

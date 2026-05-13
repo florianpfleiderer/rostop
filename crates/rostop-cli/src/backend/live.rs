@@ -267,8 +267,22 @@ fn decode_sample(decoder: Option<&mut r2r::WrappedNativeMsgUntyped>, bytes: &[u8
     DynamicValue::Bytes(bytes.len())
 }
 
+/// Cutoff above which an all-primitive array is replaced by `ArrayElided`
+/// rather than materialised element-by-element.
+///
+/// A `sensor_msgs/msg/Image` published at 30 Hz has ~2.76 M uint8 elements per
+/// frame — fully decoding it produces ~150 MB of `DynamicValue::U64`s every
+/// frame and pegs both CPU and RSS. Real diagnostic arrays (LaserScan ranges
+/// at ~720–1080, JointState position at <100, transforms list at <20) all sit
+/// comfortably below the cutoff, so the user can still drill into them.
+const MAX_INLINE_ARRAY_LEN: usize = 4096;
+
 /// Map a `serde_json::Value` produced by `WrappedNativeMsgUntyped::to_json`
 /// onto the structural `DynamicValue` shape the inspector renders.
+///
+/// Large arrays of primitive leaves (e.g. an Image's `data: uint8[]`) are
+/// summarised as [`DynamicValue::ArrayElided`] rather than materialised — see
+/// [`MAX_INLINE_ARRAY_LEN`].
 fn json_to_dynamic(v: serde_json::Value) -> DynamicValue {
     use serde_json::Value;
     match v {
@@ -287,7 +301,11 @@ fn json_to_dynamic(v: serde_json::Value) -> DynamicValue {
         }
         Value::String(s) => DynamicValue::Str(s),
         Value::Array(items) => {
-            DynamicValue::Array(items.into_iter().map(json_to_dynamic).collect())
+            if items.len() > MAX_INLINE_ARRAY_LEN && items.iter().all(is_json_leaf_primitive) {
+                DynamicValue::ArrayElided(items.len())
+            } else {
+                DynamicValue::Array(items.into_iter().map(json_to_dynamic).collect())
+            }
         }
         Value::Object(map) => DynamicValue::Struct(
             map.into_iter()
@@ -295,6 +313,20 @@ fn json_to_dynamic(v: serde_json::Value) -> DynamicValue {
                 .collect(),
         ),
     }
+}
+
+/// True for JSON values that decode to a single scalar `DynamicValue` (i.e.
+/// not a struct or array). Used to detect the "huge bulk-data" pattern where
+/// every element is a primitive number — characteristic of message fields
+/// like `Image::data`, `PointCloud2::data`, or `LaserScan::ranges`.
+fn is_json_leaf_primitive(v: &serde_json::Value) -> bool {
+    matches!(
+        v,
+        serde_json::Value::Null
+            | serde_json::Value::Bool(_)
+            | serde_json::Value::Number(_)
+            | serde_json::Value::String(_)
+    )
 }
 
 fn peer_mismatch_error(foreign_topics: &HashSet<String>) -> anyhow::Error {
@@ -362,6 +394,106 @@ mod tests {
         let payload = [1u8, 2, 3, 4];
         let v = decode_sample(None, &payload);
         assert_eq!(v, DynamicValue::Bytes(4));
+    }
+
+    #[test]
+    fn json_to_dynamic_elides_image_sized_byte_array() {
+        // sensor_msgs/msg/Image: header + height/width/encoding/step + data[uint8].
+        // The `data` field is the dangerous one — for a 720×1280×3 frame that's
+        // ~2.76M elements, which would be ~150 MB of DynamicValue::U64 per frame.
+        // After elision it must be a single `ArrayElided(len)` summary scalar.
+        let big_len = MAX_INLINE_ARRAY_LEN + 10;
+        let raw = serde_json::json!({
+            "header": { "stamp": { "sec": 1, "nanosec": 2 }, "frame_id": "camera" },
+            "height": 720u64,
+            "width": 1280u64,
+            "encoding": "rgb8",
+            "step": 3840u64,
+            "data": vec![0u8; big_len],
+        });
+        let v = json_to_dynamic(raw);
+        let DynamicValue::Struct(fields) = &v else {
+            panic!("expected Struct, got {v:?}");
+        };
+        let data = fields
+            .iter()
+            .find(|(k, _)| k == "data")
+            .map(|(_, v)| v)
+            .expect("Image has a data field");
+        assert_eq!(
+            data,
+            &DynamicValue::ArrayElided(big_len),
+            "data was not elided"
+        );
+        // The other (small) fields stay fully materialised.
+        let header = fields
+            .iter()
+            .find(|(k, _)| k == "header")
+            .map(|(_, v)| v)
+            .unwrap();
+        assert!(matches!(header, DynamicValue::Struct(_)));
+    }
+
+    #[test]
+    fn json_to_dynamic_keeps_pointcloud_sized_pointfield_array() {
+        // PointCloud2.fields is a struct array of length 4-ish (xyz + intensity).
+        // Even at the elision threshold, an array of structs should never be
+        // collapsed — the user needs to drill in to inspect individual fields.
+        let items: Vec<serde_json::Value> = (0..16)
+            .map(|i| serde_json::json!({"name": format!("f{i}"), "offset": i * 4}))
+            .collect();
+        let v = json_to_dynamic(serde_json::Value::Array(items));
+        let DynamicValue::Array(arr) = &v else {
+            panic!("expected an Array of structs, got {v:?}");
+        };
+        assert_eq!(arr.len(), 16);
+        assert!(matches!(arr[0], DynamicValue::Struct(_)));
+    }
+
+    #[test]
+    fn json_to_dynamic_keeps_laserscan_sized_ranges_array() {
+        // A 1080-element float32 ranges array is below the cutoff and must
+        // stay drillable so the user can confirm a specific beam.
+        let ranges: Vec<serde_json::Value> = (0..1080)
+            .map(|i| serde_json::json!(i as f64 * 0.01))
+            .collect();
+        let v = json_to_dynamic(serde_json::Value::Array(ranges));
+        let DynamicValue::Array(arr) = &v else {
+            panic!("expected an Array, got {v:?}");
+        };
+        assert_eq!(arr.len(), 1080);
+    }
+
+    #[test]
+    fn json_to_dynamic_elides_large_float_array() {
+        // A wonkily-large LaserScan or pointfield could blow past the cutoff
+        // entirely as a flat float array — still primitives, still elide.
+        let big_len = MAX_INLINE_ARRAY_LEN * 2;
+        let arr: Vec<serde_json::Value> = (0..big_len).map(|_| serde_json::json!(0.0)).collect();
+        let v = json_to_dynamic(serde_json::Value::Array(arr));
+        assert_eq!(v, DynamicValue::ArrayElided(big_len));
+    }
+
+    #[test]
+    fn json_to_dynamic_keeps_tf_message_with_many_transforms() {
+        // tf2_msgs/msg/TFMessage occasionally publishes hundreds of transforms.
+        // They're structs, so they must remain individually drillable.
+        let count = MAX_INLINE_ARRAY_LEN / 4;
+        let items: Vec<serde_json::Value> = (0..count)
+            .map(|i| {
+                serde_json::json!({
+                    "child_frame_id": format!("link_{i}"),
+                    "parent_frame_id": "base_link",
+                    "transform": { "translation": { "x": 0.0, "y": 0.0, "z": 0.0 } }
+                })
+            })
+            .collect();
+        let v = json_to_dynamic(serde_json::Value::Array(items));
+        let DynamicValue::Array(arr) = &v else {
+            panic!("transforms should stay an Array, got {v:?}");
+        };
+        assert_eq!(arr.len(), count);
+        assert!(matches!(arr[0], DynamicValue::Struct(_)));
     }
 
     #[test]

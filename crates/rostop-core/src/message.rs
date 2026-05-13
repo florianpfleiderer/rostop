@@ -14,6 +14,10 @@ pub enum DynamicValue {
     F64(f64),
     Str(String),
     Bytes(usize), // length of bytes-like fields; we don't carry the payload
+    /// An array of `len` primitive leaves that the backend chose not to
+    /// materialise (e.g. an Image's `data` field with millions of elements).
+    /// Rendered as a single summary row — not drillable.
+    ArrayElided(usize),
     Array(Vec<DynamicValue>),
     Struct(Vec<(String, DynamicValue)>),
 }
@@ -82,6 +86,7 @@ fn scalar_to_string(v: &DynamicValue) -> String {
         DynamicValue::F64(f) => format!("{f}"),
         DynamicValue::Str(s) => format!("{s:?}"),
         DynamicValue::Bytes(n) => format!("<{n} bytes>"),
+        DynamicValue::ArrayElided(n) => format!("[{n} items, elided]"),
         _ => unreachable!("scalar_to_string called on container"),
     }
 }

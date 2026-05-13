@@ -1,0 +1,96 @@
+name: Release
+
+# Cuts a tarball release for ROS 2 Jazzy on x86_64.
+# Trigger by pushing a tag like `v0.1.0`:
+#   git tag v0.1.0 && git push origin v0.1.0
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Tag to release (e.g. v0.1.0). Must already exist.'
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    container:
+      image: ros:jazzy-ros-base
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag || github.ref }}
+
+      - name: Install system deps
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends \
+            curl ca-certificates build-essential pkg-config git \
+            clang libclang-dev cmake
+
+      - name: Install Rust 1.88
+        run: |
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | \
+            sh -s -- -y --default-toolchain 1.88.0 --profile minimal
+          echo "$HOME/.cargo/bin" >> $GITHUB_PATH
+
+      - name: cargo build --release
+        run: cargo build --release -p rostop-cli
+
+      - name: Package tarball
+        id: package
+        run: |
+          set -euo pipefail
+          VERSION="${GITHUB_REF_NAME#v}"
+          [ -n "${{ inputs.tag }}" ] && VERSION="${{ inputs.tag }}" && VERSION="${VERSION#v}"
+          NAME="rostop-${VERSION}-jazzy-x86_64"
+          mkdir -p "dist/${NAME}"
+          cp target/release/rostop "dist/${NAME}/"
+          cp README.md "dist/${NAME}/"
+          # LICENSE file is optional — copy if present
+          [ -f LICENSE ] && cp LICENSE "dist/${NAME}/" || true
+          tar -C dist -czf "${NAME}.tar.gz" "${NAME}"
+          sha256sum "${NAME}.tar.gz" > "${NAME}.tar.gz.sha256"
+          echo "tarball=${NAME}.tar.gz" >> "$GITHUB_OUTPUT"
+          echo "checksum=${NAME}.tar.gz.sha256" >> "$GITHUB_OUTPUT"
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-assets
+          path: |
+            ${{ steps.package.outputs.tarball }}
+            ${{ steps.package.outputs.checksum }}
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag || github.ref }}
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: release-assets
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          TAG="${{ inputs.tag || github.ref_name }}"
+          gh release create "$TAG" \
+            --title "$TAG" \
+            --generate-notes \
+            --notes "Prebuilt binary for ROS 2 Jazzy on x86_64. Install:
+          \`\`\`bash
+          curl -L https://github.com/${{ github.repository }}/releases/download/${TAG}/rostop-${TAG#v}-jazzy-x86_64.tar.gz | tar -xz
+          install -m755 rostop-${TAG#v}-jazzy-x86_64/rostop ~/.local/bin/
+          \`\`\`
+          Requires ROS 2 Jazzy installed on the host. See README for env-var setup." \
+            *.tar.gz *.sha256

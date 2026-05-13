@@ -47,7 +47,31 @@ just test                 # cargo test --workspace, all green
 just run --demo           # launches the TUI with a fabricated 6-topic system
 ```
 
+For a Humble + Fast DDS robot, swap in the Humble image:
+
+```bash
+just image-humble         # build the Humble dev env (ROS 2 Humble + Rust 1.88)
+just test-humble          # cargo test --workspace, all green (Humble container)
+just run-live-humble      # connect to a real Humble robot — see "Running against a real ROS 2 system" below
+```
+
 If `cargo` + ROS 2 Jazzy are already installed locally, plain `cargo run -- --demo` works too — Docker is just for reproducibility.
+
+### All Just recipes
+
+| Recipe                           | What it does                                                                  |
+| -------------------------------- | ----------------------------------------------------------------------------- |
+| `just image` / `just image-humble` | Build the Jazzy / Humble dev image (idempotent).                            |
+| `just shell` / `just shell-humble` | Drop into an interactive shell inside the dev container with ROS 2 sourced. |
+| `just test` / `just test-humble`   | `cargo test --workspace` inside the corresponding container.                |
+| `just test-core`                 | Run only the `rostop-core` unit tests (no ROS link, fastest feedback).        |
+| `just build` / `just build-humble` | `cargo build --workspace` inside the corresponding container.               |
+| `just run -- --demo`             | Launch the TUI with the fabricated demo backend.                              |
+| `just run-live` / `just run-live-humble` | Connect to a real ROS 2 system on the host (see below).               |
+| `just fmt` / `just clippy`       | Format + lint inside the dev container.                                       |
+| `just clean`                     | `cargo clean` inside the dev container.                                       |
+
+All recipes route through `scripts/dev.sh`, which picks the right Dockerfile, image tag (`rostop-dev:<distro>`), `target/` volume, and `setup.bash` based on `$ROSTOP_DISTRO` (default `jazzy`). You can also call it directly: `ROSTOP_DISTRO=humble ./scripts/dev.sh "cargo <whatever>"`.
 
 ### Which build do I need?
 

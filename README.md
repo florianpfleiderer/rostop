@@ -85,14 +85,18 @@ If that's empty, rostop will be empty too — fix discovery first.
 
 | Key            | Action                            |
 | -------------- | --------------------------------- |
-| `j` / `↓`      | move selection down               |
-| `k` / `↑`      | move selection up                 |
+| `j` / `↓`      | move selection down (in focused pane) |
+| `k` / `↑`      | move selection up (in focused pane)   |
 | `g` / `G`      | jump to top / bottom              |
+| `l` / `→` / `Enter` | step **into** the selected item: from the topic table moves focus to the inspector; from the inspector descends into the selected struct/array field |
+| `h` / `←`      | step **out**: pop one inspector level, or return focus to the topic table when already at the message root |
 | `/`            | edit filter (Esc clears, Enter confirms) |
 | `s`            | cycle sort key (Hz → BW → Type → Name) |
 | `r`            | reverse sort order                |
 | `p`            | pause / resume sample ingestion   |
 | `q` / `Ctrl-C` | quit                              |
+
+The inspector pane only ever shows one level of the message tree at a time, so even very large structures (e.g. a `tf2_msgs/msg/TFMessage` with hundreds of transforms) stay readable. Drill in to a single `transforms[i]` to see just its fields; `h` pops back to the list. The currently focused pane is highlighted with a yellow border; the inactive pane keeps its cursor visible but dimmed.
 
 ## Architecture
 

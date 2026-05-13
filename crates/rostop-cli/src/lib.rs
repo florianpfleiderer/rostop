@@ -55,6 +55,8 @@ pub mod test_support {
             &app.filter,
             elapsed_ns,
         );
+        let selected_topic = rows.get(app.selected).map(|r| r.name.clone());
+        app.sync_inspector_for_topic(selected_topic.as_deref());
         let _: io::Result<()> = terminal
             .draw(|f| ui::view::render(f, app, &rows))
             .map(|_| ());

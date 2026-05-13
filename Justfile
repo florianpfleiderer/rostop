@@ -103,3 +103,21 @@ clippy:
 # Clean
 clean:
     ./scripts/dev.sh "cargo clean"
+
+# Build the Jazzy .deb release artifact into dist/ (needs rostop-dev:jazzy with cargo-deb — rebuild with `just image` if you predate that).
+package-jazzy:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    mkdir -p dist
+    ROSTOP_DISTRO=jazzy ./scripts/dev.sh \
+        "cargo deb --variant jazzy -p rostop-cli --features live --output /work/dist/"
+    cd dist && sha256sum rostop-jazzy_*.deb | tee SHA256SUMS.jazzy
+
+# Build the Humble .deb release artifact into dist/ (needs rostop-dev:humble with cargo-deb — rebuild with `just image-humble` if you predate that).
+package-humble:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    mkdir -p dist
+    ROSTOP_DISTRO=humble ./scripts/dev.sh \
+        "cargo deb --variant humble -p rostop-cli --features live --output /work/dist/"
+    cd dist && sha256sum rostop-humble_*.deb | tee SHA256SUMS.humble

@@ -19,6 +19,9 @@ RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
       | sh -s -- -y --default-toolchain 1.88.0 --profile minimal \
       --component rustfmt --component clippy
 
+# cargo-deb produces the .deb release artifact (`just package-jazzy`).
+RUN cargo install cargo-deb --locked --version ^2
+
 ENV RMW_IMPLEMENTATION=rmw_cyclonedds_cpp
 
 WORKDIR /work

@@ -57,6 +57,28 @@ just run-live-humble      # connect to a real Humble robot — see "Running agai
 
 If `cargo` + ROS 2 Jazzy are already installed locally, plain `cargo run -- --demo` works too — Docker is just for reproducibility.
 
+### Install (`.deb`)
+
+To get a system-installed `rostop` binary, build a `.deb` inside the matching dev container and `apt install` it. The `.deb` declares its `ros-<distro>-*` dependencies, so apt pulls in any message packages the user is missing.
+
+```bash
+just package-humble        # → dist/rostop-humble_<ver>-1_amd64.deb
+just package-jazzy         # → dist/rostop-jazzy_<ver>-1_amd64.deb
+```
+
+Copy the `.deb` to the target machine (e.g. `scp dist/rostop-humble_*.deb robot:`) and install:
+
+```bash
+# on the robot, Ubuntu 22.04 + ROS 2 Humble
+sudo apt install ./rostop-humble_0.1.0-1_amd64.deb
+source /opt/ros/humble/setup.bash
+rostop
+```
+
+`rostop-humble` and `rostop-jazzy` both ship `/usr/bin/rostop` and declare a mutual `Conflicts:`, so apt will only let you install one at a time on a given machine — pick the one that matches the robot's ROS distro.
+
+> **Note:** the repo is private while this is under test, so there's no public download URL. Distribute the `.deb` over scp / a shared drive for now. When the project goes public, the same artifacts will be attached to GitHub Releases.
+
 ### All Just recipes
 
 | Recipe                           | What it does                                                                  |

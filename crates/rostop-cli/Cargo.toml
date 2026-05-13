@@ -33,3 +33,48 @@ tracing-subscriber.workspace = true
 r2r = { version = "0.9", optional = true }
 futures = { version = "0.3", optional = true }
 serde_json = { version = "1", optional = true }
+
+# Debian packaging. The base `[package.metadata.deb]` block holds everything
+# that's the same across ROS distros; the per-distro `variants.*` blocks add
+# the `ros-<distro>-*` Depends list and override `name` so the resulting
+# package is e.g. `rostop-humble` / `rostop-jazzy`. Build with
+# `cargo deb --variant humble --features live` (see `just package-humble`).
+[package.metadata.deb]
+name = "rostop"
+maintainer = "Florian Pfleiderer <florian.pfleiderer@agile-robots.com>"
+copyright = "2026, Florian Pfleiderer <florian.pfleiderer@agile-robots.com>"
+section = "utils"
+priority = "optional"
+assets = [
+    ["../../target/release/rostop", "usr/bin/", "755"],
+    ["../../README.md", "usr/share/doc/rostop/README.md", "644"],
+    ["../../CHANGELOG.md", "usr/share/doc/rostop/CHANGELOG.md", "644"],
+]
+
+[package.metadata.deb.variants.humble]
+name = "rostop-humble"
+conflicts = "rostop-jazzy"
+depends = "ros-humble-ros-base, ros-humble-std-msgs, ros-humble-sensor-msgs, ros-humble-geometry-msgs, ros-humble-nav-msgs, ros-humble-diagnostic-msgs, ros-humble-tf2-msgs, ros-humble-control-msgs, ros-humble-trajectory-msgs, ros-humble-lifecycle-msgs, ros-humble-rcl-interfaces, ros-humble-realsense2-camera-msgs"
+extended-description = """\
+rostop is an interactive terminal UI for inspecting and debugging ROS 2
+topics, in the spirit of htop. It shows the live topic graph, per-topic
+Hz/BW/jitter statistics, and a field-level inspector for the currently
+selected topic.
+
+This package is built against ROS 2 Humble (Ubuntu 22.04). Source
+/opt/ros/humble/setup.bash before running rostop so the dynamic linker
+can find rcl, rmw, and the message type-support libraries."""
+
+[package.metadata.deb.variants.jazzy]
+name = "rostop-jazzy"
+conflicts = "rostop-humble"
+depends = "ros-jazzy-ros-base, ros-jazzy-rmw-cyclonedds-cpp, ros-jazzy-std-msgs, ros-jazzy-sensor-msgs, ros-jazzy-geometry-msgs, ros-jazzy-nav-msgs, ros-jazzy-diagnostic-msgs, ros-jazzy-tf2-msgs, ros-jazzy-control-msgs, ros-jazzy-trajectory-msgs, ros-jazzy-lifecycle-msgs, ros-jazzy-rcl-interfaces, ros-jazzy-realsense2-camera-msgs"
+extended-description = """\
+rostop is an interactive terminal UI for inspecting and debugging ROS 2
+topics, in the spirit of htop. It shows the live topic graph, per-topic
+Hz/BW/jitter statistics, and a field-level inspector for the currently
+selected topic.
+
+This package is built against ROS 2 Jazzy (Ubuntu 24.04). Source
+/opt/ros/jazzy/setup.bash before running rostop so the dynamic linker
+can find rcl, rmw, and the message type-support libraries."""

@@ -8,6 +8,10 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- Inspector pane now shows an "(idle — no messages in Ns · P pub / S sub)"
+  indicator for topics that have been known to the graph for ≥ 3 s without
+  producing a message (e.g. `/parameter_events`), replacing the ambiguous
+  "(no message yet)" placeholder once the subscription has clearly settled.
 - New `DynamicValue::ArrayElided(len)` variant in `rostop-core::message`,
   rendered as `[N items, elided]`. The live backend's `json_to_dynamic` uses
   it to summarise large primitive arrays (`Image::data`, `PointCloud2::data`,

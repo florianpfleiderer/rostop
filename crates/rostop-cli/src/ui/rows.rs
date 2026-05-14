@@ -16,6 +16,11 @@ pub struct TopicTableRow {
     pub jitter_ms: f64,
     pub publishers: u32,
     pub subscribers: u32,
+    /// Whole seconds since the topic was first observed in the graph. 0 when
+    /// no `first_seen_ns` has been stamped yet (e.g. test fixtures that
+    /// bypass `App::ingest`). The inspector uses this to decide whether to
+    /// show an "idle" indicator instead of "no message yet".
+    pub idle_secs: u64,
 }
 
 /// Build the list of topic rows for display.
@@ -47,6 +52,10 @@ pub fn build_rows(
             jitter_ms: e.stats.jitter_ms(now_ns),
             publishers: e.publishers,
             subscribers: e.subscribers,
+            idle_secs: e
+                .first_seen_ns
+                .map(|t| now_ns.saturating_sub(t) / 1_000_000_000)
+                .unwrap_or(0),
         })
         .collect()
 }

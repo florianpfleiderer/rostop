@@ -10,6 +10,26 @@ use rostop_core::message::{level_rows, path_segments};
 use crate::app::{App, Focus};
 use crate::ui::rows::{fmt_bps, TopicTableRow};
 
+/// How long (whole seconds) a topic must be known in the graph with zero
+/// messages before the inspector pane swaps "(no message yet)" for an
+/// "(idle — …)" indicator. Picked to be longer than the slowest "normal"
+/// topic (≈1 Hz) so we don't flicker on transients but short enough to
+/// reassure the user within a few render frames.
+const IDLE_THRESHOLD_SECS: u64 = 3;
+
+/// Build the placeholder line shown inside the inspector when the selected
+/// topic has no buffered message. Below `IDLE_THRESHOLD_SECS` we keep the
+/// original "(no message yet)" copy so transient gaps don't flash an alarming
+/// label; at or above the threshold we explain *why* the pane is empty:
+/// the subscription is healthy, the topic just isn't publishing.
+fn inspector_empty_state(idle_secs: u64, publishers: u32, subscribers: u32) -> String {
+    if idle_secs < IDLE_THRESHOLD_SECS {
+        "  (no message yet)".to_string()
+    } else {
+        format!("  (idle — no messages in {idle_secs}s · {publishers} pub / {subscribers} sub)")
+    }
+}
+
 pub fn render(f: &mut Frame, app: &App, rows: &[TopicTableRow]) {
     let area = f.area();
     let chunks = Layout::default()
@@ -113,7 +133,8 @@ fn render_bottom(f: &mut Frame, area: Rect, app: &App, rows: &[TopicTableRow]) {
 
 fn render_inspector(f: &mut Frame, area: Rect, app: &App, rows: &[TopicTableRow]) {
     let focused = app.focus == Focus::Inspector;
-    let selected_name = rows.get(app.selected).map(|r| r.name.clone());
+    let selected_row = rows.get(app.selected);
+    let selected_name = selected_row.map(|r| r.name.clone());
     let message = selected_name.as_ref().and_then(|n| app.last_message.get(n));
 
     let breadcrumb = match (&selected_name, message) {
@@ -145,10 +166,16 @@ fn render_inspector(f: &mut Frame, area: Rect, app: &App, rows: &[TopicTableRow]
                     .collect()
             }
         }
-        None => vec![Line::from(Span::styled(
-            "  (no message yet)",
-            Style::default().fg(Color::DarkGray),
-        ))],
+        None => {
+            let text = match selected_row {
+                Some(r) => inspector_empty_state(r.idle_secs, r.publishers, r.subscribers),
+                None => "  (no message yet)".to_string(),
+            };
+            vec![Line::from(Span::styled(
+                text,
+                Style::default().fg(Color::DarkGray),
+            ))]
+        }
     };
     let para = Paragraph::new(lines).block(
         Block::default()
@@ -293,4 +320,37 @@ fn render_status_bar(f: &mut Frame, area: Rect, app: &App) {
         Span::raw(format!("  filter:{:?}", app.filter)),
     ]);
     f.render_widget(Paragraph::new(line), area);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn empty_state_under_threshold_returns_no_message_yet() {
+        // 0 .. IDLE_THRESHOLD_SECS-1 should still show the original copy.
+        for idle in 0..IDLE_THRESHOLD_SECS {
+            assert_eq!(
+                inspector_empty_state(idle, 1, 0),
+                "  (no message yet)",
+                "idle={idle} below threshold should show no-message-yet"
+            );
+        }
+    }
+
+    #[test]
+    fn empty_state_at_or_above_threshold_returns_idle_indicator() {
+        let s = inspector_empty_state(IDLE_THRESHOLD_SECS, 1, 0);
+        assert!(s.contains("idle"), "expected idle indicator, got: {s}");
+        assert!(s.contains(&format!("{IDLE_THRESHOLD_SECS}s")));
+        assert!(s.contains("1 pub"));
+        assert!(s.contains("0 sub"));
+    }
+
+    #[test]
+    fn empty_state_renders_arbitrary_pub_sub_counts() {
+        let s = inspector_empty_state(10, 2, 3);
+        assert!(s.contains("2 pub"), "got: {s}");
+        assert!(s.contains("3 sub"), "got: {s}");
+    }
 }

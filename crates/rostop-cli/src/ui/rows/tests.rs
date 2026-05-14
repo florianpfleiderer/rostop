@@ -61,6 +61,33 @@ fn build_rows_populates_endpoint_counts() {
 }
 
 #[test]
+fn build_rows_reports_idle_secs_zero_when_first_seen_unset() {
+    let r = populated_registry();
+    // populated_registry() never calls mark_seen, so every entry has
+    // first_seen_ns == None and idle_secs must be 0.
+    let rows = build_rows(&r, SortKey::Name, SortOrder::Ascending, "", ns(10.0));
+    for row in &rows {
+        assert_eq!(
+            row.idle_secs, 0,
+            "row {:?} should report 0 idle_secs",
+            row.name
+        );
+    }
+}
+
+#[test]
+fn build_rows_reports_idle_secs_from_first_seen() {
+    let mut r = TopicRegistry::new();
+    r.upsert("/parameter_events", "rcl_interfaces/msg/ParameterEvent");
+    r.mark_seen("/parameter_events", ns(1.0));
+
+    // 10 - 1 = 9 seconds of idle time.
+    let rows = build_rows(&r, SortKey::Name, SortOrder::Ascending, "", ns(10.0));
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].idle_secs, 9);
+}
+
+#[test]
 fn fmt_bps_picks_a_sensible_unit() {
     assert_eq!(fmt_bps(0.0), "0 B/s");
     assert_eq!(fmt_bps(500.0), "500 B/s");

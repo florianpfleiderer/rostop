@@ -1,5 +1,12 @@
 # rostop
 
+[![CI](https://github.com/florianpfleiderer/rostop/actions/workflows/ci.yml/badge.svg)](https://github.com/florianpfleiderer/rostop/actions/workflows/ci.yml)
+[![Release](https://github.com/florianpfleiderer/rostop/actions/workflows/release.yml/badge.svg)](https://github.com/florianpfleiderer/rostop/actions/workflows/release.yml)
+[![Rust 1.88](https://img.shields.io/badge/Rust-1.88-orange.svg?logo=rust)](https://www.rust-lang.org/)
+[![ROS 2 Humble](https://img.shields.io/badge/ROS%202-Humble-22314E?logo=ros&logoColor=white)](https://docs.ros.org/en/humble/)
+[![ROS 2 Jazzy](https://img.shields.io/badge/ROS%202-Jazzy-22314E?logo=ros&logoColor=white)](https://docs.ros.org/en/jazzy/)
+[![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](#license)
+
 > Interactive TUI for inspecting and debugging ROS 2 topics — like `htop`, for robots.
 
 `rostop` is a fast, terminal-native tool for inspecting a running ROS 2 system: live topic list with rate / bandwidth / jitter, drill-in message inspector with decoded fields and sparklines, filter, sort, search. Built in Rust with [`ratatui`](https://github.com/ratatui-org/ratatui) and a swappable backend trait.
@@ -39,55 +46,52 @@
 
 ## Quick start
 
+The repo doesn't pick a default ROS distro — every recipe is suffixed with the target distro (`-jazzy`, `-humble`, ...). Pick the one that matches the robot you're testing against.
+
 ```bash
 git clone git@github.com:florianpfleiderer/rostop.git
 cd rostop
-just image                # build the Docker dev env (ROS 2 Jazzy + Rust 1.88)
-just test                 # cargo test --workspace, all green
-just run --demo           # launches the TUI with a fabricated 6-topic system
-```
 
-For a Humble + Fast DDS robot, swap in the Humble image:
+# Jazzy + CycloneDDS (Ubuntu 24.04)
+just image-jazzy          # build the Jazzy dev env (ROS 2 Jazzy + Rust 1.88)
+just test-jazzy           # cargo test --workspace, all green
+just run-jazzy --demo     # launches the TUI with a fabricated 6-topic system
 
-```bash
+# Humble + Fast DDS (Ubuntu 22.04)
 just image-humble         # build the Humble dev env (ROS 2 Humble + Rust 1.88)
 just test-humble          # cargo test --workspace, all green (Humble container)
 just run-live-humble      # connect to a real Humble robot — see "Running against a real ROS 2 system" below
 ```
 
-If `cargo` + ROS 2 Jazzy are already installed locally, plain `cargo run -- --demo` works too — Docker is just for reproducibility.
+Adding a new distro means dropping a `Dockerfile.<distro>` next to the existing ones and mirroring the recipe block in the `Justfile` — no other code changes required.
+
+If `cargo` + ROS 2 are already installed locally, plain `cargo run -- --demo` works too — Docker is just for reproducibility.
 
 ### Install (prebuilt artifacts)
 
-Every tagged release publishes both `.deb` and `.tar.gz` artifacts for ROS 2 Humble (Ubuntu 22.04) and Jazzy (Ubuntu 24.04). Pick the matching distro for your robot.
-
-**Humble / Ubuntu 22.04 — `.deb` (recommended):**
+Every tagged release publishes `.deb` and `.tar.gz` artifacts for each supported distro. Pick the one that matches your robot — currently `humble` (Ubuntu 22.04) or `jazzy` (Ubuntu 24.04).
 
 ```bash
-TAG=v0.1.0
+TAG=v0.1.0                           # pick a release tag
 VERSION="${TAG#v}"
-curl -L -o rostop-humble.deb \
-  https://github.com/florianpfleiderer/rostop/releases/download/${TAG}/rostop-humble_${VERSION}-1_amd64.deb
-sudo apt install ./rostop-humble.deb
-source /opt/ros/humble/setup.bash
-rostop
-```
+DISTRO=humble                        # or jazzy
 
-**Humble / Ubuntu 22.04 — tarball:**
+# Option A — .deb (recommended; apt pulls missing ros-<distro>-* message packages)
+curl -L -o rostop-${DISTRO}.deb \
+  https://github.com/florianpfleiderer/rostop/releases/download/${TAG}/rostop-${DISTRO}_${VERSION}-1_amd64.deb
+sudo apt install ./rostop-${DISTRO}.deb
 
-```bash
-TAG=v0.1.0
-VERSION="${TAG#v}"
-curl -L https://github.com/florianpfleiderer/rostop/releases/download/${TAG}/rostop-${VERSION}-humble-x86_64.tar.gz \
+# Option B — tarball (assumes the ros-<distro>-* message packages are already installed)
+curl -L https://github.com/florianpfleiderer/rostop/releases/download/${TAG}/rostop-${VERSION}-${DISTRO}-x86_64.tar.gz \
   | tar -xz
-install -m755 rostop-${VERSION}-humble-x86_64/rostop ~/.local/bin/
-source /opt/ros/humble/setup.bash
+install -m755 rostop-${VERSION}-${DISTRO}-x86_64/rostop ~/.local/bin/
+
+# Either way:
+source /opt/ros/${DISTRO}/setup.bash
 rostop
 ```
 
-**Jazzy / Ubuntu 24.04** — replace `humble` with `jazzy` in any of the snippets above.
-
-The `.deb` declares its `ros-<distro>-*` dependencies so `apt` pulls in any missing message packages; the tarball assumes you have those installed already. `rostop-humble` and `rostop-jazzy` both ship `/usr/bin/rostop` and declare a mutual `Conflicts:`, so only one can be installed on a given host.
+`rostop-humble` and `rostop-jazzy` both ship `/usr/bin/rostop` and declare a mutual `Conflicts:`, so only one can be installed on a given host.
 
 ### Building artifacts locally
 
@@ -100,42 +104,45 @@ just package-jazzy         # → dist/rostop-jazzy_<ver>-1_amd64.deb
 
 ### All Just recipes
 
-| Recipe                           | What it does                                                                  |
-| -------------------------------- | ----------------------------------------------------------------------------- |
-| `just image` / `just image-humble` | Build the Jazzy / Humble dev image (idempotent).                            |
-| `just shell` / `just shell-humble` | Drop into an interactive shell inside the dev container with ROS 2 sourced. |
-| `just test` / `just test-humble`   | `cargo test --workspace` inside the corresponding container.                |
-| `just test-core`                 | Run only the `rostop-core` unit tests (no ROS link, fastest feedback).        |
-| `just build` / `just build-humble` | `cargo build --workspace` inside the corresponding container.               |
-| `just run -- --demo`             | Launch the TUI with the fabricated demo backend.                              |
-| `just run-live` / `just run-live-humble` | Connect to a real ROS 2 system on the host (see below).               |
-| `just fmt` / `just clippy`       | Format + lint inside the dev container.                                       |
-| `just clean`                     | `cargo clean` inside the dev container.                                       |
+Every distro has the same recipe block; replace `<distro>` with `jazzy` or `humble`.
 
-All recipes route through `scripts/dev.sh`, which picks the right Dockerfile, image tag (`rostop-dev:<distro>`), `target/` volume, and `setup.bash` based on `$ROSTOP_DISTRO` (default `jazzy`). You can also call it directly: `ROSTOP_DISTRO=humble ./scripts/dev.sh "cargo <whatever>"`.
+| Recipe                       | What it does                                                                  |
+| ---------------------------- | ----------------------------------------------------------------------------- |
+| `just image-<distro>`        | Build the `<distro>` dev image (idempotent).                                  |
+| `just shell-<distro>`        | Drop into an interactive shell inside the dev container with ROS 2 sourced.   |
+| `just test-<distro>`         | `cargo test --workspace` inside the `<distro>` container.                     |
+| `just build-<distro>`        | `cargo build --workspace` inside the `<distro>` container.                    |
+| `just run-<distro> -- --demo` | Launch the TUI with the fabricated demo backend.                             |
+| `just run-live-<distro>`     | Connect to a real ROS 2 system on the host (see below).                       |
+| `just fmt-<distro>` / `just clippy-<distro>` | Format + lint inside the `<distro>` container.                |
+| `just clean-<distro>`        | `cargo clean` inside the `<distro>` container.                                |
+| `just package-<distro>`      | Build the `<distro>` `.deb` into `dist/`.                                     |
+| `just test-core-<distro>`    | Run only the `rostop-core` unit tests (no ROS link, fastest feedback).        |
+
+All recipes route through `scripts/dev.sh`, which picks the Dockerfile, image tag (`rostop-dev:<distro>`), `target/` volume, and `setup.bash` based on `$ROSTOP_DISTRO`. There is no default — set it explicitly when calling the script directly: `ROSTOP_DISTRO=humble ./scripts/dev.sh "cargo <whatever>"`.
 
 ### Which build do I need?
 
 `r2r` (rostop's ROS 2 client library) links against the system `rcl`/`rmw` headers at build time, so the binary is locked to one ROS 2 distro and one RMW. To talk to a robot you need a rostop build that matches it:
 
-| Robot runs                       | Use this                                  |
-| -------------------------------- | ----------------------------------------- |
-| Jazzy + CycloneDDS               | `just run-live` (default — `Dockerfile`)        |
-| Humble + Fast DDS                | `just run-live-humble` (`Dockerfile.humble`)    |
+| Robot runs                       | Use this                                          |
+| -------------------------------- | ------------------------------------------------- |
+| Jazzy + CycloneDDS               | `just run-live-jazzy` (`Dockerfile.jazzy`)        |
+| Humble + Fast DDS                | `just run-live-humble` (`Dockerfile.humble`)      |
 | something else                   | add a `Dockerfile.<distro>` and a matching recipe |
 
-Same source tree, different build container. `scripts/dev.sh` picks the right Dockerfile / image tag / `setup.bash` based on `ROSTOP_DISTRO` (default `jazzy`); each distro gets its own `target/` volume so cached artifacts don't collide. The compiled binary stamps `ROS_DISTRO` and `RMW_IMPLEMENTATION` from the build env (`build.rs`) and quotes them back in error messages, so you can tell which build you're holding without running `--version`.
+Same source tree, different build container. `scripts/dev.sh` picks the Dockerfile / image tag / `setup.bash` based on `ROSTOP_DISTRO`; each distro gets its own `target/` volume so cached artifacts don't collide. The compiled binary stamps `ROS_DISTRO` and `RMW_IMPLEMENTATION` from the build env (`build.rs`) and quotes them back in error messages, so you can tell which build you're holding without running `--version`.
 
 ### Running against a real ROS 2 system
 
-The `just run-live` / `just run-live-humble` recipes launch the container with `--network=host` and `--ipc=host`, so DDS discovery reaches the topics on your robot or workstation just like a native install would.
+The `just run-live-<distro>` recipes launch the container with `--network=host` and `--ipc=host`, so DDS discovery reaches the topics on your robot or workstation just like a native install would.
 
 ```bash
-# Jazzy (CycloneDDS) — default
-just run-live              # uses host's ROS_DOMAIN_ID + RMW
-just run-live --some-flag  # extra args forwarded to the rostop binary
+# Jazzy (CycloneDDS default)
+just run-live-jazzy              # uses host's ROS_DOMAIN_ID + RMW
+just run-live-jazzy --some-flag  # extra args forwarded to the rostop binary
 
-# Humble (Fast DDS)
+# Humble (Fast DDS default)
 just run-live-humble
 ```
 
@@ -155,7 +162,7 @@ Caveats:
 - Cross-distro / cross-RMW peers don't work — the peer probe will refuse to start with a diagnostic naming the build target. Pick the matching recipe instead of overriding `RMW_IMPLEMENTATION`.
 - Multicast must reach between host and target. Different subnets / restrictive switches break discovery — fall back to `CYCLONEDDS_URI` with explicit unicast peers (Jazzy) or a similar Fast DDS peer-list XML (Humble).
 
-Sanity check from inside the container (`just shell` / `just shell-humble`, then):
+Sanity check from inside the container (`just shell-jazzy` / `just shell-humble`, then):
 
 ```bash
 ros2 topic list   # should show the topics your robot is publishing
@@ -219,14 +226,25 @@ crates/rostop-cli     2 integration  full app + render → TestBackend buffer
 crates/rostop-cli   + 3 live tests   ros2 topic pub → LiveBackend (--features live)
 ```
 
-Run them yourself with `just test` (Docker) or `cargo test --workspace` (local).
+Run them yourself with `just test-jazzy` / `just test-humble` (Docker) or `cargo test --workspace` (local).
 
 ## Roadmap
 
-- **Recording / replay** — `:rec <topic>` writes a small `.mcap` from selected topics.
-- **Service caller & param editor** panes (`F2` / `F3`).
-- **Node-graph mini-map** showing the live pub→sub graph for the selected topic, inspired by `rqt_graph` but live and animated.
-- **`htop`-style colour theme + config file** (`~/.config/rostop/config.toml`).
+Shipped:
+
+- [x] **Topic list with Hz / BW / jitter** + sparklines, filter, sort, search.
+- [x] **Demo backend** — fabricated 6-topic system, runs anywhere with no ROS install.
+- [x] **Live backend** — r2r-based, accurate wire-byte counts via `subscribe_raw`.
+- [x] **Message inspector** — dynamic field-tree decoding, no `.msg` codegen required; large arrays elided so `Image` / `PointCloud2` stay responsive.
+- [x] **Humble + Jazzy support** — per-distro Dockerfiles, mirrored `just` recipes, no default distro.
+- [x] **Release artifacts** — `.deb` and `.tar.gz` for each distro published on every `v*` tag, CI-gated.
+
+Planned:
+
+- [ ] **Recording / replay** — `:rec <topic>` writes a small `.mcap` from selected topics.
+- [ ] **Service caller & param editor** panes (`F2` / `F3`).
+- [ ] **Node-graph mini-map** showing the live pub→sub graph for the selected topic, inspired by `rqt_graph` but live and animated.
+- [ ] **`htop`-style colour theme + config file** (`~/.config/rostop/config.toml`).
 
 ## License
 

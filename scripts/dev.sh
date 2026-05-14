@@ -1,23 +1,29 @@
 #!/usr/bin/env bash
 # Run a command inside the rostop dev container with cached cargo + target volumes.
 #
-# The dev image is parameterised by ROS distro via the ROSTOP_DISTRO env var
-# (default: jazzy). Each distro gets its own image tag, target volume, and
-# sourced setup.bash so cached artifacts don't collide.
+# The dev image is parameterised by ROS distro via the ROSTOP_DISTRO env var.
+# There is intentionally no default — set it explicitly (e.g. `ROSTOP_DISTRO=jazzy`)
+# or call one of the per-distro `just` recipes (`just <recipe>-jazzy`, `-humble`, ...).
+# Each distro gets its own Dockerfile, image tag, target volume, and sourced
+# setup.bash so cached artifacts don't collide.
 set -euo pipefail
 
-DISTRO="${ROSTOP_DISTRO:-jazzy}"
-case "$DISTRO" in
-  jazzy)  DOCKERFILE="Dockerfile" ;;
-  humble) DOCKERFILE="Dockerfile.humble" ;;
-  *)
-    echo "[dev.sh] unsupported ROSTOP_DISTRO=$DISTRO (supported: jazzy, humble)" >&2
-    exit 2
-    ;;
-esac
+if [ -z "${ROSTOP_DISTRO:-}" ]; then
+  echo "[dev.sh] ROSTOP_DISTRO is not set." >&2
+  echo "[dev.sh] Set it explicitly (e.g. ROSTOP_DISTRO=jazzy) or use a per-distro just recipe (\`just test-jazzy\`, \`just test-humble\`, ...)." >&2
+  exit 2
+fi
+
+DISTRO="$ROSTOP_DISTRO"
+DOCKERFILE="Dockerfile.${DISTRO}"
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+
+if [ ! -f "$ROOT/$DOCKERFILE" ]; then
+  echo "[dev.sh] no $DOCKERFILE in repo root — add one to support ROSTOP_DISTRO=$DISTRO." >&2
+  exit 2
+fi
 
 IMAGE="rostop-dev:${DISTRO}"
-ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 if ! docker image inspect "$IMAGE" >/dev/null 2>&1; then
   echo "[dev.sh] building $IMAGE from $DOCKERFILE ..." >&2

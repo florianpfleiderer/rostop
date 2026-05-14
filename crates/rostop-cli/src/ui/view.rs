@@ -26,9 +26,7 @@ fn inspector_empty_state(idle_secs: u64, publishers: u32, subscribers: u32) -> S
     if idle_secs < IDLE_THRESHOLD_SECS {
         "  (no message yet)".to_string()
     } else {
-        format!(
-            "  (idle — no messages in {idle_secs}s · {publishers} pub / {subscribers} sub)"
-        )
+        format!("  (idle — no messages in {idle_secs}s · {publishers} pub / {subscribers} sub)")
     }
 }
 

@@ -67,7 +67,11 @@ fn build_rows_reports_idle_secs_zero_when_first_seen_unset() {
     // first_seen_ns == None and idle_secs must be 0.
     let rows = build_rows(&r, SortKey::Name, SortOrder::Ascending, "", ns(10.0));
     for row in &rows {
-        assert_eq!(row.idle_secs, 0, "row {:?} should report 0 idle_secs", row.name);
+        assert_eq!(
+            row.idle_secs, 0,
+            "row {:?} should report 0 idle_secs",
+            row.name
+        );
     }
 }
 

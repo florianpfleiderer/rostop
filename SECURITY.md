@@ -13,7 +13,7 @@ rostop is at 0.x; only the most recent release receives fixes. If you are runnin
 
 Please **do not** open a public issue for security problems.
 
-Use GitHub's [private vulnerability reporting](https://github.com/florianpfleiderer/rostop/security/advisories/new) (Security → Report a vulnerability on the repo page). If that is not available for you, email **florian.pfleiderer@agile-robots.com** with subject prefix `[rostop security]`.
+Use GitHub's [private vulnerability reporting](https://github.com/florianpfleiderer/rostop/security/advisories/new) (Security → Report a vulnerability on the repo page). If that is not available for you, email **florian@pfleiderer.at** with subject prefix `[rostop security]`.
 
 Please include:
 

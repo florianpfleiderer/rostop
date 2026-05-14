@@ -6,6 +6,21 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- New `DynamicValue::ArrayElided(len)` variant in `rostop-core::message`,
+  rendered as `[N items, elided]`. The live backend's `json_to_dynamic` uses
+  it to summarise large primitive arrays (`Image::data`, `PointCloud2::data`,
+  `LaserScan::ranges` over 4096 elements, etc.) instead of materialising
+  millions of `DynamicValue::U64`s per frame. Small drillable arrays
+  (`TFMessage::transforms`, `JointState::position`, anything ≤ 4096) are
+  unchanged.
+- GitHub Releases workflow now builds Humble (Ubuntu 22.04) **and** Jazzy
+  (Ubuntu 24.04) artifacts on every `v*` tag — each as both a `.tar.gz` and
+  a `.deb`, all built with the `live` feature enabled. The release notes
+  embed copy-pasteable install snippets and a combined `SHA256SUMS`.
+- CI now gates both Humble and Jazzy via a build matrix.
+
 ### Changed
 
 - Live backend now decodes message payloads via `r2r::WrappedNativeMsgUntyped`,
@@ -14,6 +29,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   scalar. Wire-byte counts still come from `subscribe_raw`, so Hz / BW /
   jitter remain accurate. Topics whose message type was not linked in at
   build time fall back to the previous `Bytes(len)` placeholder.
+- Live-feature integration tests now run with `--test-threads=1` so multiple
+  `LiveBackend` instances do not race on the shared `ROS_DOMAIN_ID`.
 
 ## [0.1.0] - 2026-05-13
 

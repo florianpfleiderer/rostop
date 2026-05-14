@@ -4,6 +4,8 @@ All notable changes to rostop are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
 ## [0.1.0] - 2026-05-14
 
 First public release. Inspect a live ROS 2 graph from the terminal.
@@ -54,3 +56,6 @@ First public release. Inspect a live ROS 2 graph from the terminal.
   shutdown.
 - Topics whose message type was not linked in at build time fall back to a
   `DynamicValue::Bytes(len)` placeholder in the inspector pane.
+
+[Unreleased]: https://github.com/florianpfleiderer/rostop/compare/v0.1.0...HEAD
+[0.1.0]: https://github.com/florianpfleiderer/rostop/releases/tag/v0.1.0

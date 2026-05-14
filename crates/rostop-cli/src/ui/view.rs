@@ -10,6 +10,28 @@ use rostop_core::message::{level_rows, path_segments};
 use crate::app::{App, Focus};
 use crate::ui::rows::{fmt_bps, TopicTableRow};
 
+/// How long (whole seconds) a topic must be known in the graph with zero
+/// messages before the inspector pane swaps "(no message yet)" for an
+/// "(idle — …)" indicator. Picked to be longer than the slowest "normal"
+/// topic (≈1 Hz) so we don't flicker on transients but short enough to
+/// reassure the user within a few render frames.
+const IDLE_THRESHOLD_SECS: u64 = 3;
+
+/// Build the placeholder line shown inside the inspector when the selected
+/// topic has no buffered message. Below `IDLE_THRESHOLD_SECS` we keep the
+/// original "(no message yet)" copy so transient gaps don't flash an alarming
+/// label; at or above the threshold we explain *why* the pane is empty:
+/// the subscription is healthy, the topic just isn't publishing.
+fn inspector_empty_state(idle_secs: u64, publishers: u32, subscribers: u32) -> String {
+    if idle_secs < IDLE_THRESHOLD_SECS {
+        "  (no message yet)".to_string()
+    } else {
+        format!(
+            "  (idle — no messages in {idle_secs}s · {publishers} pub / {subscribers} sub)"
+        )
+    }
+}
+
 pub fn render(f: &mut Frame, app: &App, rows: &[TopicTableRow]) {
     let area = f.area();
     let chunks = Layout::default()
@@ -293,4 +315,37 @@ fn render_status_bar(f: &mut Frame, area: Rect, app: &App) {
         Span::raw(format!("  filter:{:?}", app.filter)),
     ]);
     f.render_widget(Paragraph::new(line), area);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn empty_state_under_threshold_returns_no_message_yet() {
+        // 0 .. IDLE_THRESHOLD_SECS-1 should still show the original copy.
+        for idle in 0..IDLE_THRESHOLD_SECS {
+            assert_eq!(
+                inspector_empty_state(idle, 1, 0),
+                "  (no message yet)",
+                "idle={idle} below threshold should show no-message-yet"
+            );
+        }
+    }
+
+    #[test]
+    fn empty_state_at_or_above_threshold_returns_idle_indicator() {
+        let s = inspector_empty_state(IDLE_THRESHOLD_SECS, 1, 0);
+        assert!(s.contains("idle"), "expected idle indicator, got: {s}");
+        assert!(s.contains(&format!("{}s", IDLE_THRESHOLD_SECS)));
+        assert!(s.contains("1 pub"));
+        assert!(s.contains("0 sub"));
+    }
+
+    #[test]
+    fn empty_state_renders_arbitrary_pub_sub_counts() {
+        let s = inspector_empty_state(10, 2, 3);
+        assert!(s.contains("2 pub"), "got: {s}");
+        assert!(s.contains("3 sub"), "got: {s}");
+    }
 }

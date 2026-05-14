@@ -135,7 +135,8 @@ fn render_bottom(f: &mut Frame, area: Rect, app: &App, rows: &[TopicTableRow]) {
 
 fn render_inspector(f: &mut Frame, area: Rect, app: &App, rows: &[TopicTableRow]) {
     let focused = app.focus == Focus::Inspector;
-    let selected_name = rows.get(app.selected).map(|r| r.name.clone());
+    let selected_row = rows.get(app.selected);
+    let selected_name = selected_row.map(|r| r.name.clone());
     let message = selected_name.as_ref().and_then(|n| app.last_message.get(n));
 
     let breadcrumb = match (&selected_name, message) {
@@ -167,10 +168,16 @@ fn render_inspector(f: &mut Frame, area: Rect, app: &App, rows: &[TopicTableRow]
                     .collect()
             }
         }
-        None => vec![Line::from(Span::styled(
-            "  (no message yet)",
-            Style::default().fg(Color::DarkGray),
-        ))],
+        None => {
+            let text = match selected_row {
+                Some(r) => inspector_empty_state(r.idle_secs, r.publishers, r.subscribers),
+                None => "  (no message yet)".to_string(),
+            };
+            vec![Line::from(Span::styled(
+                text,
+                Style::default().fg(Color::DarkGray),
+            ))]
+        }
     };
     let para = Paragraph::new(lines).block(
         Block::default()
@@ -337,7 +344,7 @@ mod tests {
     fn empty_state_at_or_above_threshold_returns_idle_indicator() {
         let s = inspector_empty_state(IDLE_THRESHOLD_SECS, 1, 0);
         assert!(s.contains("idle"), "expected idle indicator, got: {s}");
-        assert!(s.contains(&format!("{}s", IDLE_THRESHOLD_SECS)));
+        assert!(s.contains(&format!("{IDLE_THRESHOLD_SECS}s")));
         assert!(s.contains("1 pub"));
         assert!(s.contains("0 sub"));
     }

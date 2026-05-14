@@ -175,6 +175,7 @@ impl App {
                 } => {
                     self.registry.upsert(&name, &type_name);
                     self.registry.set_endpoints(&name, publishers, subscribers);
+                    self.registry.mark_seen(&name, elapsed_ns);
                 }
                 BackendEvent::TopicRemoved(name) => {
                     self.registry.remove(&name);
@@ -384,4 +385,33 @@ fn restore_terminal(terminal: &mut Terminal<CrosstermBackend<Stdout>>) -> Result
     execute!(terminal.backend_mut(), LeaveAlternateScreen)?;
     terminal.show_cursor()?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::backend::demo::DemoBackend;
+
+    fn empty_topic_event(name: &str) -> BackendEvent {
+        BackendEvent::Topic {
+            name: name.to_string(),
+            type_name: "std_msgs/msg/Empty".to_string(),
+            publishers: 1,
+            subscribers: 0,
+        }
+    }
+
+    #[test]
+    fn ingesting_a_topic_event_marks_first_seen() {
+        let backend: Box<dyn RosBackend> = Box::new(DemoBackend::new());
+        let mut app = App::new(backend);
+
+        app.ingest_for_tests(vec![empty_topic_event("/parameter_events")]);
+
+        let entry = app.registry.get("/parameter_events").unwrap();
+        assert!(
+            entry.first_seen_ns.is_some(),
+            "first_seen_ns should be stamped on first Topic event"
+        );
+    }
 }

@@ -68,6 +68,13 @@ jobs:
           RMW_IMPLEMENTATION: ${{ matrix.rmw }}
           ROS_DOMAIN_ID: "0"
           ROS_LOCALHOST_ONLY: "1"
+          # Disable the 2 s startup peer probe in CI. The probe is an end-user
+          # UX safeguard for cross-distro/RMW mismatches; in CI every spawn of
+          # LiveBackend sees the test publisher as a "foreign" peer and races
+          # the probe deadline against DDS discovery, which is flaky under
+          # --test-threads=1. The probe code itself is still exercised by
+          # `new_succeeds_and_label_is_live`.
+          ROSTOP_SKIP_PEER_PROBE: "1"
         run: |
           source /opt/ros/${{ matrix.distro }}/setup.bash
           # Live tests share a ROS_DOMAIN_ID and each spawns `ros2 topic pub`,

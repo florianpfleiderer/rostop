@@ -1,58 +1,43 @@
 # rostop developer commands. Everything runs inside the Docker dev container.
 #
-# The dev environment is parameterised by ROS distro. The default recipes
-# target Jazzy; mirror `-humble` recipes target Humble. `scripts/dev.sh`
-# picks the Dockerfile, image tag, and target volume based on $ROSTOP_DISTRO.
+# The dev environment is parameterised by ROS distro. There is no default —
+# every recipe that builds, tests, or runs against ROS is suffixed with the
+# distro (`-jazzy`, `-humble`, ...). `scripts/dev.sh` picks the Dockerfile,
+# image tag, and target volume from $ROSTOP_DISTRO. Add a new distro by
+# dropping a `Dockerfile.<distro>` next to the existing ones and mirroring
+# the recipe pair below.
 
 default:
     @just --list
 
-# Build the Jazzy dev image (idempotent)
-image:
-    docker build -t rostop-dev:jazzy -f Dockerfile .
+# --- Jazzy ----------------------------------------------------------------
 
-# Build the Humble dev image (idempotent)
-image-humble:
-    docker build -t rostop-dev:humble -f Dockerfile.humble .
+# Build the Jazzy dev image (idempotent)
+image-jazzy:
+    docker build -t rostop-dev:jazzy -f Dockerfile.jazzy .
 
 # Open an interactive shell in the Jazzy dev container with ROS 2 sourced
-shell:
-    ./scripts/dev.sh "exec bash"
-
-# Open an interactive shell in the Humble dev container
-shell-humble:
-    ROSTOP_DISTRO=humble ./scripts/dev.sh "exec bash"
+shell-jazzy:
+    ROSTOP_DISTRO=jazzy ./scripts/dev.sh "exec bash"
 
 # Run cargo test (workspace) inside the Jazzy container
-test *args:
-    ./scripts/dev.sh "cargo test --workspace {{args}}"
-
-# Run cargo test (workspace) inside the Humble container
-test-humble *args:
-    ROSTOP_DISTRO=humble ./scripts/dev.sh "cargo test --workspace {{args}}"
-
-# Run a single core-crate test fast (no ROS link)
-test-core *args:
-    ./scripts/dev.sh "cargo test -p rostop-core {{args}}"
+test-jazzy *args:
+    ROSTOP_DISTRO=jazzy ./scripts/dev.sh "cargo test --workspace {{args}}"
 
 # Build the workspace inside the Jazzy container
-build *args:
-    ./scripts/dev.sh "cargo build --workspace {{args}}"
+build-jazzy *args:
+    ROSTOP_DISTRO=jazzy ./scripts/dev.sh "cargo build --workspace {{args}}"
 
-# Build the workspace inside the Humble container
-build-humble *args:
-    ROSTOP_DISTRO=humble ./scripts/dev.sh "cargo build --workspace {{args}}"
-
-# Run the CLI (e.g. `just run --demo`)
-run *args:
-    ./scripts/dev.sh "cargo run -p rostop-cli -- {{args}}"
+# Run the CLI (demo backend, no live ROS) inside the Jazzy container
+run-jazzy *args:
+    ROSTOP_DISTRO=jazzy ./scripts/dev.sh "cargo run -p rostop-cli -- {{args}}"
 
 # Run the CLI against a real Jazzy ROS 2 system on the host (host network so DDS discovery works).
 # Honours ROS_DOMAIN_ID (default 0) and RMW_IMPLEMENTATION (default rmw_cyclonedds_cpp) from the caller's env.
-run-live *args:
+run-live-jazzy *args:
     #!/usr/bin/env bash
     set -euo pipefail
-    docker image inspect rostop-dev:jazzy >/dev/null 2>&1 || docker build -t rostop-dev:jazzy -f Dockerfile .
+    docker image inspect rostop-dev:jazzy >/dev/null 2>&1 || docker build -t rostop-dev:jazzy -f Dockerfile.jazzy .
     TTY_FLAGS=""; [ -t 0 ] && TTY_FLAGS="-it"
     docker run --rm ${TTY_FLAGS} \
       --network=host \
@@ -69,6 +54,49 @@ run-live *args:
       -w /work \
       rostop-dev:jazzy \
       bash -lc "source /opt/ros/jazzy/setup.bash && cargo run -p rostop-cli --features live -- {{args}}"
+
+# Format inside the Jazzy container
+fmt-jazzy:
+    ROSTOP_DISTRO=jazzy ./scripts/dev.sh "cargo fmt --all"
+
+# Lint inside the Jazzy container
+clippy-jazzy:
+    ROSTOP_DISTRO=jazzy ./scripts/dev.sh "cargo clippy --workspace --all-targets -- -D warnings"
+
+# Clean cargo artifacts in the Jazzy container
+clean-jazzy:
+    ROSTOP_DISTRO=jazzy ./scripts/dev.sh "cargo clean"
+
+# Build the Jazzy .deb release artifact into dist/ (needs rostop-dev:jazzy with cargo-deb — rebuild with `just image-jazzy` if you predate that).
+package-jazzy:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    mkdir -p dist
+    ROSTOP_DISTRO=jazzy ./scripts/dev.sh \
+        "cargo deb --variant jazzy -p rostop-cli --features live --output /work/dist/"
+    cd dist && sha256sum rostop-jazzy_*.deb | tee SHA256SUMS.jazzy
+
+# --- Humble ---------------------------------------------------------------
+
+# Build the Humble dev image (idempotent)
+image-humble:
+    docker build -t rostop-dev:humble -f Dockerfile.humble .
+
+# Open an interactive shell in the Humble dev container
+shell-humble:
+    ROSTOP_DISTRO=humble ./scripts/dev.sh "exec bash"
+
+# Run cargo test (workspace) inside the Humble container
+test-humble *args:
+    ROSTOP_DISTRO=humble ./scripts/dev.sh "cargo test --workspace {{args}}"
+
+# Build the workspace inside the Humble container
+build-humble *args:
+    ROSTOP_DISTRO=humble ./scripts/dev.sh "cargo build --workspace {{args}}"
+
+# Run the CLI (demo backend, no live ROS) inside the Humble container
+run-humble *args:
+    ROSTOP_DISTRO=humble ./scripts/dev.sh "cargo run -p rostop-cli -- {{args}}"
 
 # Run the CLI against a real Humble ROS 2 system on the host (host network so DDS discovery works).
 # Honours ROS_DOMAIN_ID (default 0) and RMW_IMPLEMENTATION (default rmw_fastrtps_cpp — Humble's default RMW).
@@ -92,26 +120,17 @@ run-live-humble *args:
       rostop-dev:humble \
       bash -lc "source /opt/ros/humble/setup.bash && cargo run -p rostop-cli --features live -- {{args}}"
 
-# Format
-fmt:
-    ./scripts/dev.sh "cargo fmt --all"
+# Format inside the Humble container
+fmt-humble:
+    ROSTOP_DISTRO=humble ./scripts/dev.sh "cargo fmt --all"
 
-# Lint
-clippy:
-    ./scripts/dev.sh "cargo clippy --workspace --all-targets -- -D warnings"
+# Lint inside the Humble container
+clippy-humble:
+    ROSTOP_DISTRO=humble ./scripts/dev.sh "cargo clippy --workspace --all-targets -- -D warnings"
 
-# Clean
-clean:
-    ./scripts/dev.sh "cargo clean"
-
-# Build the Jazzy .deb release artifact into dist/ (needs rostop-dev:jazzy with cargo-deb — rebuild with `just image` if you predate that).
-package-jazzy:
-    #!/usr/bin/env bash
-    set -euo pipefail
-    mkdir -p dist
-    ROSTOP_DISTRO=jazzy ./scripts/dev.sh \
-        "cargo deb --variant jazzy -p rostop-cli --features live --output /work/dist/"
-    cd dist && sha256sum rostop-jazzy_*.deb | tee SHA256SUMS.jazzy
+# Clean cargo artifacts in the Humble container
+clean-humble:
+    ROSTOP_DISTRO=humble ./scripts/dev.sh "cargo clean"
 
 # Build the Humble .deb release artifact into dist/ (needs rostop-dev:humble with cargo-deb — rebuild with `just image-humble` if you predate that).
 package-humble:
@@ -121,3 +140,15 @@ package-humble:
     ROSTOP_DISTRO=humble ./scripts/dev.sh \
         "cargo deb --variant humble -p rostop-cli --features live --output /work/dist/"
     cd dist && sha256sum rostop-humble_*.deb | tee SHA256SUMS.humble
+
+# --- Core-only (no ROS link) ----------------------------------------------
+#
+# `rostop-core` has no ROS dependency, so these don't really care which distro
+# they run under — they're suffixed only so `scripts/dev.sh` has a container
+# to use. Pick whichever you've already built.
+
+test-core-jazzy *args:
+    ROSTOP_DISTRO=jazzy ./scripts/dev.sh "cargo test -p rostop-core {{args}}"
+
+test-core-humble *args:
+    ROSTOP_DISTRO=humble ./scripts/dev.sh "cargo test -p rostop-core {{args}}"

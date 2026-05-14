@@ -55,12 +55,12 @@ cd rostop
 # Jazzy + CycloneDDS (Ubuntu 24.04)
 just image-jazzy          # build the Jazzy dev env (ROS 2 Jazzy + Rust 1.88)
 just test-jazzy           # cargo test --workspace, all green
-just run-jazzy --demo     # launches the TUI with a fabricated 6-topic system
+just run-jazzy -- --demo  # launches the TUI with a fabricated 6-topic system
 
 # Humble + Fast DDS (Ubuntu 22.04)
 just image-humble         # build the Humble dev env (ROS 2 Humble + Rust 1.88)
 just test-humble          # cargo test --workspace, all green (Humble container)
-just run-live-humble      # connect to a real Humble robot — see "Running against a real ROS 2 system" below
+just run-humble           # connect to a real Humble robot — see "Running against a real ROS 2 system" below
 ```
 
 Adding a new distro means dropping a `Dockerfile.<distro>` next to the existing ones and mirroring the recipe block in the `Justfile` — no other code changes required.
@@ -112,8 +112,8 @@ Every distro has the same recipe block; replace `<distro>` with `jazzy` or `humb
 | `just shell-<distro>`        | Drop into an interactive shell inside the dev container with ROS 2 sourced.   |
 | `just test-<distro>`         | `cargo test --workspace` inside the `<distro>` container.                     |
 | `just build-<distro>`        | `cargo build --workspace` inside the `<distro>` container.                    |
-| `just run-<distro> -- --demo` | Launch the TUI with the fabricated demo backend.                             |
-| `just run-live-<distro>`     | Connect to a real ROS 2 system on the host (see below).                       |
+| `just run-<distro>`          | Connect to a real ROS 2 system on the host (see below).                       |
+| `just run-<distro> -- --demo` | Launch the TUI with the fabricated demo backend (no ROS traffic needed).     |
 | `just fmt-<distro>` / `just clippy-<distro>` | Format + lint inside the `<distro>` container.                |
 | `just clean-<distro>`        | `cargo clean` inside the `<distro>` container.                                |
 | `just package-<distro>`      | Build the `<distro>` `.deb` into `dist/`.                                     |
@@ -127,23 +127,24 @@ All recipes route through `scripts/dev.sh`, which picks the Dockerfile, image ta
 
 | Robot runs                       | Use this                                          |
 | -------------------------------- | ------------------------------------------------- |
-| Jazzy + CycloneDDS               | `just run-live-jazzy` (`Dockerfile.jazzy`)        |
-| Humble + Fast DDS                | `just run-live-humble` (`Dockerfile.humble`)      |
+| Jazzy + CycloneDDS               | `just run-jazzy` (`Dockerfile.jazzy`)             |
+| Humble + Fast DDS                | `just run-humble` (`Dockerfile.humble`)           |
 | something else                   | add a `Dockerfile.<distro>` and a matching recipe |
 
 Same source tree, different build container. `scripts/dev.sh` picks the Dockerfile / image tag / `setup.bash` based on `ROSTOP_DISTRO`; each distro gets its own `target/` volume so cached artifacts don't collide. The compiled binary stamps `ROS_DISTRO` and `RMW_IMPLEMENTATION` from the build env (`build.rs`) and quotes them back in error messages, so you can tell which build you're holding without running `--version`.
 
 ### Running against a real ROS 2 system
 
-The `just run-live-<distro>` recipes launch the container with `--network=host` and `--ipc=host`, so DDS discovery reaches the topics on your robot or workstation just like a native install would.
+The `just run-<distro>` recipes launch the container with `--network=host` and `--ipc=host`, so DDS discovery reaches the topics on your robot or workstation just like a native install would. Append `-- --demo` to swap in the fabricated demo backend without rebuilding.
 
 ```bash
 # Jazzy (CycloneDDS default)
-just run-live-jazzy              # uses host's ROS_DOMAIN_ID + RMW
-just run-live-jazzy --some-flag  # extra args forwarded to the rostop binary
+just run-jazzy              # uses host's ROS_DOMAIN_ID + RMW
+just run-jazzy -- --demo    # fabricated demo backend (no ROS traffic)
+just run-jazzy --some-flag  # extra args forwarded to the rostop binary
 
 # Humble (Fast DDS default)
-just run-live-humble
+just run-humble
 ```
 
 Environment variables (read from the calling shell, forwarded into the container):

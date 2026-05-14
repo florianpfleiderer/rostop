@@ -28,13 +28,11 @@ test-jazzy *args:
 build-jazzy *args:
     ROSTOP_DISTRO=jazzy ./scripts/dev.sh "cargo build --workspace {{args}}"
 
-# Run the CLI (demo backend, no live ROS) inside the Jazzy container
+# Run the CLI against a real Jazzy ROS 2 system on the host (host network so DDS
+# discovery works). Honours ROS_DOMAIN_ID (default 0) and RMW_IMPLEMENTATION
+# (default rmw_cyclonedds_cpp) from the caller's env.
+# Pass `-- --demo` to swap in the fabricated demo backend (no ROS traffic needed).
 run-jazzy *args:
-    ROSTOP_DISTRO=jazzy ./scripts/dev.sh "cargo run -p rostop-cli -- {{args}}"
-
-# Run the CLI against a real Jazzy ROS 2 system on the host (host network so DDS discovery works).
-# Honours ROS_DOMAIN_ID (default 0) and RMW_IMPLEMENTATION (default rmw_cyclonedds_cpp) from the caller's env.
-run-live-jazzy *args:
     #!/usr/bin/env bash
     set -euo pipefail
     docker image inspect rostop-dev:jazzy >/dev/null 2>&1 || docker build -t rostop-dev:jazzy -f Dockerfile.jazzy .
@@ -94,13 +92,11 @@ test-humble *args:
 build-humble *args:
     ROSTOP_DISTRO=humble ./scripts/dev.sh "cargo build --workspace {{args}}"
 
-# Run the CLI (demo backend, no live ROS) inside the Humble container
+# Run the CLI against a real Humble ROS 2 system on the host (host network so DDS
+# discovery works). Honours ROS_DOMAIN_ID (default 0) and RMW_IMPLEMENTATION
+# (default rmw_fastrtps_cpp — Humble's default RMW).
+# Pass `-- --demo` to swap in the fabricated demo backend (no ROS traffic needed).
 run-humble *args:
-    ROSTOP_DISTRO=humble ./scripts/dev.sh "cargo run -p rostop-cli -- {{args}}"
-
-# Run the CLI against a real Humble ROS 2 system on the host (host network so DDS discovery works).
-# Honours ROS_DOMAIN_ID (default 0) and RMW_IMPLEMENTATION (default rmw_fastrtps_cpp — Humble's default RMW).
-run-live-humble *args:
     #!/usr/bin/env bash
     set -euo pipefail
     docker image inspect rostop-dev:humble >/dev/null 2>&1 || docker build -t rostop-dev:humble -f Dockerfile.humble .

@@ -17,6 +17,10 @@ pub struct TopicEntry {
     pub publishers: u32,
     pub subscribers: u32,
     pub stats: TopicStats,
+    /// Monotonic nanoseconds (from `App::elapsed_ns`) when this topic was first
+    /// observed via the backend. `None` until the first ingest event sets it;
+    /// used to compute idle time for healthy-but-quiet topics.
+    pub first_seen_ns: Option<u64>,
 }
 
 /// Sort keys for `TopicRegistry::sorted_by`.
@@ -72,6 +76,7 @@ impl TopicRegistry {
                 publishers: 0,
                 subscribers: 0,
                 stats: TopicStats::new(DEFAULT_WINDOW_NS),
+                first_seen_ns: None,
             });
     }
 
@@ -93,6 +98,16 @@ impl TopicRegistry {
         if let Some(e) = self.entries.get_mut(name) {
             e.publishers = publishers;
             e.subscribers = subscribers;
+        }
+    }
+
+    /// Stamp the time this topic was first seen, if not already stamped.
+    /// Idempotent — later calls do not overwrite the original timestamp.
+    pub fn mark_seen(&mut self, name: &str, t_ns: u64) {
+        if let Some(e) = self.entries.get_mut(name) {
+            if e.first_seen_ns.is_none() {
+                e.first_seen_ns = Some(t_ns);
+            }
         }
     }
 

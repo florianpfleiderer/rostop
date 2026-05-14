@@ -41,6 +41,27 @@ fn record_for_unknown_topic_is_a_noop() {
 }
 
 #[test]
+fn mark_seen_sets_first_seen_lazily() {
+    let mut reg = TopicRegistry::new();
+    reg.upsert("/scan", "sensor_msgs/msg/LaserScan");
+    assert!(reg.get("/scan").unwrap().first_seen_ns.is_none());
+
+    reg.mark_seen("/scan", ns(1.0));
+    assert_eq!(reg.get("/scan").unwrap().first_seen_ns, Some(ns(1.0)));
+
+    // A later mark_seen must not overwrite the first one.
+    reg.mark_seen("/scan", ns(5.0));
+    assert_eq!(reg.get("/scan").unwrap().first_seen_ns, Some(ns(1.0)));
+}
+
+#[test]
+fn mark_seen_for_unknown_topic_is_a_noop() {
+    let mut reg = TopicRegistry::new();
+    reg.mark_seen("/ghost", ns(1.0)); // must not panic
+    assert_eq!(reg.len(), 0);
+}
+
+#[test]
 fn set_endpoints_tracks_pub_sub_counts() {
     let mut reg = TopicRegistry::new();
     reg.upsert("/cmd_vel", "geometry_msgs/msg/Twist");

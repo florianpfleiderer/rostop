@@ -6,6 +6,7 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Cell, Paragraph, Row, Table};
 use ratatui::Frame;
 use rostop_core::message::{level_rows, path_segments};
+use rostop_core::registry::SortOrder;
 
 use crate::app::{App, Focus};
 use crate::ui::rows::{fmt_bps, TopicTableRow};
@@ -451,7 +452,15 @@ fn render_status_bar(f: &mut Frame, area: Rect, app: &App) {
     } else {
         "[LIVE]".to_string()
     };
-    let sort = format!("sort:{:?} {:?}", app.sort_key, app.sort_order);
+    // Filled triangles follow the htop / `top` convention: ▼ for Descending
+    // (high values flow downward — i.e. listed first) and ▲ for Ascending.
+    // Tight enough to keep the status bar readable in 80-column terminals
+    // and crisper than ↑/↓ arrows in low-quality terminal fonts.
+    let arrow = match app.sort_order {
+        SortOrder::Ascending => "▲",
+        SortOrder::Descending => "▼",
+    };
+    let sort = format!("sort:{:?}{arrow}", app.sort_key);
     let help = if app.fullscreen {
         "j/k:move  l/Enter:drill-in  h:drill-out  f/Esc:back  q:quit"
     } else {

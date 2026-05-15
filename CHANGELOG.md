@@ -18,6 +18,12 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   descending. The previous behaviour silently kept whatever order was
   active, which produced surprising results like "Hz ascending" (slowest
   topic first) right after cycling from Name.
+- **Status-bar sort indicator uses filled triangles.** `sort:Hz▼` /
+  `sort:Name▲` instead of `sort:Hz Descending` / `sort:Name Ascending`.
+  Same information, ~10 columns shorter — keeps the help string readable
+  in 80-column terminals. `▼` follows the htop / `top` convention (high
+  values flow downward, i.e. listed first); filled triangles render
+  more crisply than ↑/↓ arrows in low-quality terminal fonts.
 - **Focus mode is now opened with `f`** (was `Enter`). The status-bar mode
   label is `[FOCUS]` and the panel title is `focus ─ {topic} ─ …`. Pressing
   `f` again exits focus mode (`Esc` still works too), so the user can

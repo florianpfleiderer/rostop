@@ -31,7 +31,7 @@
 │  · y: 0                                                        ││                                          │
 │  · z: 0.2968074739870145                                       ││                                          │
 └────────────────────────────────────────────────────────────────┘└──────────────────────────────────────────┘
-[LIVE]  sort:Hz Descending   j/k:move  l:inspect  f:focus  s:sort  p:pause  q:quit
+[LIVE]  sort:Hz▼   j/k:move  l:inspect  f:focus  s:sort  p:pause  q:quit
 ```
 
 ## Why

@@ -30,7 +30,7 @@ fn inspector_empty_state(idle_secs: u64, publishers: u32, subscribers: u32) -> S
     }
 }
 
-pub fn render(f: &mut Frame, app: &App, rows: &[TopicTableRow]) {
+pub fn render(f: &mut Frame, app: &mut App, rows: &[TopicTableRow]) {
     let area = f.area();
     let chunks = Layout::default()
         .direction(Direction::Vertical)
@@ -45,7 +45,7 @@ pub fn render(f: &mut Frame, app: &App, rows: &[TopicTableRow]) {
     render_status_bar(f, chunks[2], app);
 }
 
-fn render_topic_table(f: &mut Frame, area: Rect, app: &App, rows: &[TopicTableRow]) {
+fn render_topic_table(f: &mut Frame, area: Rect, app: &mut App, rows: &[TopicTableRow]) {
     let header = Row::new([
         Cell::from(" TOPIC"),
         Cell::from("HZ"),
@@ -109,7 +109,15 @@ fn render_topic_table(f: &mut Frame, area: Rect, app: &App, rows: &[TopicTableRo
                 rows.len()
             )),
     );
-    f.render_widget(table, area);
+    // Stateful render so the viewport auto-scrolls to keep the selected row
+    // visible. Without this, `j`/`G` past the table area moves `app.selected`
+    // off-screen and the highlight effectively disappears.
+    if rows.is_empty() {
+        app.topic_table_state.select(None);
+    } else {
+        app.topic_table_state.select(Some(app.selected));
+    }
+    f.render_stateful_widget(table, area, &mut app.topic_table_state);
 }
 
 fn border_style(focused: bool) -> Style {

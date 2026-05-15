@@ -18,6 +18,10 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   descending. The previous behaviour silently kept whatever order was
   active, which produced surprising results like "Hz ascending" (slowest
   topic first) right after cycling from Name.
+- **Focus mode is now opened with `f`** (was `Enter`). The status-bar mode
+  label is `[FOCUS]` and the panel title is `focus ─ {topic} ─ …`. The
+  `Enter` key keeps its other meaning — descending one level inside the
+  inspector pane.
 
 ### Removed
 
@@ -25,6 +29,20 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   Sort direction is now derived from the sort key (see above) and no longer
   user-toggleable. If a per-key override becomes a real need, add it back
   behind a separate binding rather than re-exposing the global toggle.
+- **The `/` filter feature.** The `/` keybinding, the `filter:` field on
+  `App`, the `filter` parameter on `ui::rows::build_rows`, the
+  `TopicRegistry::filtered` method in `rostop-core`, the `[FILTER: …]`
+  status-bar mode and its trailing `filter:""` debug suffix, and the
+  `build_rows_applies_filter` / `filter_by_substring_matches_name_or_type`
+  tests are all gone. With sort defaulting to `Name` ascending and a
+  manageable topic count on most systems, the substring filter was unused
+  in practice; if a real need resurfaces, see how `r` came back as a
+  potential per-key override above — keep the new binding scoped.
+- **`g` / `G` jump-to-top / jump-to-bottom** in all three contexts
+  (topic table, inspector pane, focus mode). The status-bar help string
+  is shorter as a result; `j`/`k` still move one row at a time and the
+  topic table auto-scrolls under the cursor, so the user never gets
+  stranded off-screen.
 
 ### Added
 

@@ -29,14 +29,14 @@ fn drill_into_tf_transform_and_back_out() {
     // Tick long enough that every demo topic has published at least once.
     h.tick(Duration::from_millis(300));
 
-    // Select /tf in the topic table — sort defaults to Hz descending, so
-    // walk the rows to find it rather than relying on a stable index.
+    // Select /tf in the topic table — walk the sorted rows rather than
+    // relying on a stable index, since the default sort is set by
+    // App::new and the demo emits many topics.
     let elapsed_ns = h.app.elapsed_ns();
     let rows = rostop_cli::ui::rows::build_rows(
         &h.app.registry,
         h.app.sort_key,
         h.app.sort_order,
-        &h.app.filter,
         elapsed_ns,
     );
     let tf_idx = rows
@@ -116,7 +116,6 @@ fn drill_in_on_scalar_is_a_noop() {
         &h.app.registry,
         h.app.sort_key,
         h.app.sort_order,
-        &h.app.filter,
         elapsed_ns,
     );
     let cmd_vel_idx = rows
@@ -153,7 +152,6 @@ fn switching_topic_resets_drill_path() {
         &h.app.registry,
         h.app.sort_key,
         h.app.sort_order,
-        &h.app.filter,
         elapsed_ns,
     );
     let tf_idx = rows.iter().position(|r| r.name == "/tf").unwrap();

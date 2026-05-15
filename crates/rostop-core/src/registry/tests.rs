@@ -72,28 +72,6 @@ fn set_endpoints_tracks_pub_sub_counts() {
 }
 
 #[test]
-fn filter_by_substring_matches_name_or_type() {
-    let mut reg = TopicRegistry::new();
-    reg.upsert("/scan", "sensor_msgs/msg/LaserScan");
-    reg.upsert("/camera/image", "sensor_msgs/msg/Image");
-    reg.upsert("/tf", "tf2_msgs/msg/TFMessage");
-
-    let names: Vec<String> = reg
-        .filtered("Image")
-        .into_iter()
-        .map(|e| e.name.clone())
-        .collect();
-    assert_eq!(names, vec!["/camera/image".to_string()]);
-
-    let names: Vec<String> = reg
-        .filtered("/sc")
-        .into_iter()
-        .map(|e| e.name.clone())
-        .collect();
-    assert_eq!(names, vec!["/scan".to_string()]);
-}
-
-#[test]
 fn sort_by_hz_descending() {
     let mut reg = TopicRegistry::new();
     reg.upsert("/slow", "x");

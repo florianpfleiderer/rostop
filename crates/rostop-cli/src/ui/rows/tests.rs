@@ -26,26 +26,18 @@ fn populated_registry() -> TopicRegistry {
 }
 
 #[test]
-fn build_rows_returns_all_topics_with_no_filter() {
+fn build_rows_returns_every_topic() {
     let r = populated_registry();
-    let rows = build_rows(&r, SortKey::Name, SortOrder::Ascending, "", ns(1.0));
+    let rows = build_rows(&r, SortKey::Name, SortOrder::Ascending, ns(1.0));
     assert_eq!(rows.len(), 3);
     let names: Vec<&str> = rows.iter().map(|r| r.name.as_str()).collect();
     assert_eq!(names, ["/camera/image", "/cmd_vel", "/scan"]);
 }
 
 #[test]
-fn build_rows_applies_filter() {
-    let r = populated_registry();
-    let rows = build_rows(&r, SortKey::Name, SortOrder::Ascending, "image", ns(1.0));
-    assert_eq!(rows.len(), 1);
-    assert_eq!(rows[0].name, "/camera/image");
-}
-
-#[test]
 fn build_rows_sorts_by_hz_descending() {
     let r = populated_registry();
-    let rows = build_rows(&r, SortKey::Hz, SortOrder::Descending, "", ns(1.0));
+    let rows = build_rows(&r, SortKey::Hz, SortOrder::Descending, ns(1.0));
     // cmd_vel (100 Hz) > scan (40 Hz) > camera/image (30 Hz)
     let names: Vec<&str> = rows.iter().map(|r| r.name.as_str()).collect();
     assert_eq!(names, ["/cmd_vel", "/scan", "/camera/image"]);
@@ -54,7 +46,7 @@ fn build_rows_sorts_by_hz_descending() {
 #[test]
 fn build_rows_populates_endpoint_counts() {
     let r = populated_registry();
-    let rows = build_rows(&r, SortKey::Name, SortOrder::Ascending, "", ns(1.0));
+    let rows = build_rows(&r, SortKey::Name, SortOrder::Ascending, ns(1.0));
     let scan = rows.iter().find(|r| r.name == "/scan").unwrap();
     assert_eq!(scan.publishers, 1);
     assert_eq!(scan.subscribers, 2);
@@ -65,7 +57,7 @@ fn build_rows_reports_idle_secs_zero_when_first_seen_unset() {
     let r = populated_registry();
     // populated_registry() never calls mark_seen, so every entry has
     // first_seen_ns == None and idle_secs must be 0.
-    let rows = build_rows(&r, SortKey::Name, SortOrder::Ascending, "", ns(10.0));
+    let rows = build_rows(&r, SortKey::Name, SortOrder::Ascending, ns(10.0));
     for row in &rows {
         assert_eq!(
             row.idle_secs, 0,
@@ -82,7 +74,7 @@ fn build_rows_reports_idle_secs_from_first_seen() {
     r.mark_seen("/parameter_events", ns(1.0));
 
     // 10 - 1 = 9 seconds of idle time.
-    let rows = build_rows(&r, SortKey::Name, SortOrder::Ascending, "", ns(10.0));
+    let rows = build_rows(&r, SortKey::Name, SortOrder::Ascending, ns(10.0));
     assert_eq!(rows.len(), 1);
     assert_eq!(rows[0].idle_secs, 9);
 }

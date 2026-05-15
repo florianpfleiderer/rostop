@@ -49,6 +49,9 @@ pub struct App {
     /// Topic name whose message the current `inspector_path` belongs to.
     /// Used to reset drill state when the selected topic changes.
     pub inspector_topic: Option<String>,
+    /// Sticky status-bar notice — set once on the first decode failure to hint
+    /// at a possible distro/RMW mismatch. Cleared only by restarting rostop.
+    pub notice: Option<String>,
 }
 
 impl App {
@@ -83,6 +86,7 @@ impl App {
             inspector_path: Vec::new(),
             inspector_selected: 0,
             inspector_topic: None,
+            notice: None,
         }
     }
 
@@ -188,6 +192,19 @@ impl App {
                 } => {
                     self.registry.record(&name, elapsed_ns, bytes);
                     self.last_message.insert(name, value);
+                }
+                BackendEvent::DecodeFailure { .. } => {
+                    // Set the sticky hint once; suppress later failures so
+                    // the message doesn't churn. Wording mirrors README and
+                    // names the build target so the user can act on it
+                    // (the only fix is rebuilding against the peer's stack).
+                    if self.notice.is_none() {
+                        let distro = option_env!("ROSTOP_TARGET_DISTRO").unwrap_or("unknown");
+                        let rmw = option_env!("ROSTOP_TARGET_RMW").unwrap_or("unknown");
+                        self.notice = Some(format!(
+                            "INFO: possible distro/RMW mismatch — built against {distro}+{rmw}, some samples failed to decode"
+                        ));
+                    }
                 }
             }
         }
@@ -413,5 +430,30 @@ mod tests {
             entry.first_seen_ns.is_some(),
             "first_seen_ns should be stamped on first Topic event"
         );
+    }
+
+    #[test]
+    fn first_decode_failure_sets_a_sticky_notice() {
+        let backend: Box<dyn RosBackend> = Box::new(DemoBackend::new());
+        let mut app = App::new(backend);
+        assert!(app.notice.is_none());
+
+        app.ingest_for_tests(vec![BackendEvent::DecodeFailure {
+            topic: "/cmd_vel".into(),
+            type_name: "geometry_msgs/msg/Twist".into(),
+        }]);
+        let first = app.notice.clone().expect("notice should be set");
+        assert!(
+            first.contains("INFO") && first.contains("mismatch"),
+            "notice should describe the mismatch, got: {first}"
+        );
+
+        // A second failure on a different topic must not replace the notice
+        // (it's a one-shot hint, not a per-topic counter).
+        app.ingest_for_tests(vec![BackendEvent::DecodeFailure {
+            topic: "/scan".into(),
+            type_name: "sensor_msgs/msg/LaserScan".into(),
+        }]);
+        assert_eq!(app.notice.as_deref(), Some(first.as_str()));
     }
 }

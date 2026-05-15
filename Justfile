@@ -44,7 +44,6 @@ run-jazzy *args:
       -e RMW_IMPLEMENTATION="${RMW_IMPLEMENTATION:-rmw_cyclonedds_cpp}" \
       -e CYCLONEDDS_URI="${CYCLONEDDS_URI:-}" \
       -e ROS_LOCALHOST_ONLY="${ROS_LOCALHOST_ONLY:-0}" \
-      -e ROSTOP_SKIP_PEER_PROBE="${ROSTOP_SKIP_PEER_PROBE:-}" \
       -v "$(pwd)":/work \
       -v rostop-cargo-registry:/opt/cargo/registry \
       -v rostop-cargo-git:/opt/cargo/git \
@@ -107,7 +106,6 @@ run-humble *args:
       -e ROS_DOMAIN_ID="${ROS_DOMAIN_ID:-0}" \
       -e RMW_IMPLEMENTATION="${RMW_IMPLEMENTATION:-rmw_fastrtps_cpp}" \
       -e ROS_LOCALHOST_ONLY="${ROS_LOCALHOST_ONLY:-0}" \
-      -e ROSTOP_SKIP_PEER_PROBE="${ROSTOP_SKIP_PEER_PROBE:-}" \
       -v "$(pwd)":/work \
       -v rostop-cargo-registry:/opt/cargo/registry \
       -v rostop-cargo-git:/opt/cargo/git \

@@ -305,7 +305,7 @@ fn render_status_bar(f: &mut Frame, area: Rect, app: &App) {
         }
         Focus::Inspector => "j/k:move  l:drill-in  h:drill-out/back  g/G:top/bot  p:pause  q:quit",
     };
-    let line = Line::from(vec![
+    let mut spans = vec![
         Span::styled(
             mode,
             Style::default()
@@ -318,8 +318,18 @@ fn render_status_bar(f: &mut Frame, area: Rect, app: &App) {
         Span::raw("   "),
         Span::styled(help, Style::default().fg(Color::DarkGray)),
         Span::raw(format!("  filter:{:?}", app.filter)),
-    ]);
-    f.render_widget(Paragraph::new(line), area);
+    ];
+    if let Some(notice) = app.notice.as_deref() {
+        spans.push(Span::raw("   "));
+        spans.push(Span::styled(
+            notice.to_string(),
+            Style::default()
+                .fg(Color::Black)
+                .bg(Color::Yellow)
+                .add_modifier(Modifier::BOLD),
+        ));
+    }
+    f.render_widget(Paragraph::new(Line::from(spans)), area);
 }
 
 #[cfg(test)]

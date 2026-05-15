@@ -155,12 +155,11 @@ Environment variables (read from the calling shell, forwarded into the container
 | `RMW_IMPLEMENTATION`     | `rmw_cyclonedds_cpp`  | `rmw_fastrtps_cpp`      | Set to match the host's DDS vendor.                                                         |
 | `CYCLONEDDS_URI`         | unset                 | n/a                     | Optional. Path/inline XML for a CycloneDDS config — needed only if you require unicast peers or non-default interfaces. |
 | `ROS_LOCALHOST_ONLY`     | `0`                   | `0`                     | Set to `1` to restrict discovery to localhost (useful for testing on the same machine).     |
-| `ROSTOP_SKIP_PEER_PROBE` | unset                 | unset                   | Set to `1` to skip the 2 s startup peer probe (useful when peers are slow to come up).      |
 
 Caveats:
 
 - `--network=host` is Linux-only. On macOS / Windows Docker Desktop, host networking does not bridge to the LAN; use a native install or run the container inside a Linux VM that's on the robot's network.
-- Cross-distro / cross-RMW peers don't work — the peer probe will refuse to start with a diagnostic naming the build target. Pick the matching recipe instead of overriding `RMW_IMPLEMENTATION`.
+- Cross-distro / cross-RMW peers don't work — `r2r` is linked against one specific stack and CDR decode will fail on samples from peers built against another. rostop will still open and show the topic graph, and the status bar will surface a one-shot `INFO: possible distro/RMW mismatch …` hint once it sees a sample fail to decode. Pick the matching recipe instead of overriding `RMW_IMPLEMENTATION`.
 - Multicast must reach between host and target. Different subnets / restrictive switches break discovery — fall back to `CYCLONEDDS_URI` with explicit unicast peers (Jazzy) or a similar Fast DDS peer-list XML (Humble).
 
 Sanity check from inside the container (`just shell-jazzy` / `just shell-humble`, then):

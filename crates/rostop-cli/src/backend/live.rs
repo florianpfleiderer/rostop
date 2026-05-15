@@ -14,10 +14,8 @@
 //! mapped to [`DynamicValue`]. On decode failure (e.g. type-support not
 //! available) we fall back to `DynamicValue::Bytes(len)`.
 
-use std::collections::{HashMap, HashSet};
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::collections::HashMap;
 use std::sync::mpsc::{self, Receiver, Sender};
-use std::sync::Arc;
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -33,17 +31,8 @@ use crate::backend::{BackendEvent, RosBackend};
 const GRAPH_POLL_INTERVAL: Duration = Duration::from_millis(500);
 const SPIN_TICK: Duration = Duration::from_millis(50);
 
-/// rostop's own ROS node name. Used to tell rostop-published endpoints apart
-/// from peer-published ones during the peer probe.
+/// rostop's own ROS node name.
 const SELF_NODE_NAME: &str = "rostop";
-
-/// How long to listen for samples from foreign publishers before deciding
-/// whether peers on the wire speak rostop's wire format.
-const PROBE_DURATION: Duration = Duration::from_secs(2);
-
-/// Env var that disables the peer probe. Useful for empty graphs, transient-
-/// local-only setups, or when running rostop ahead of the rest of the system.
-const SKIP_PROBE_ENV: &str = "ROSTOP_SKIP_PEER_PROBE";
 
 pub struct LiveBackend {
     rx: Receiver<BackendEvent>,
@@ -139,36 +128,27 @@ fn spin_loop(
     let mut pool = LocalPool::new();
     let spawner = pool.spawner();
     let mut known: HashMap<String, String> = HashMap::new();
-    let mut foreign_topics: HashSet<String> = HashSet::new();
-    let samples_received = Arc::new(AtomicUsize::new(0));
     let mut last_poll = Instant::now()
         .checked_sub(GRAPH_POLL_INTERVAL)
         .unwrap_or_else(Instant::now);
 
-    let skip_probe = std::env::var(SKIP_PROBE_ENV).is_ok_and(|v| !v.is_empty() && v != "0");
-    let probe_deadline = Instant::now() + PROBE_DURATION;
-    let mut init_sent = false;
-    if skip_probe {
-        let _ = init_tx.send(Ok(()));
-        init_sent = true;
-    }
+    // Always start. Previous releases ran a 2 s probe and refused to open
+    // when foreign publishers were seen with zero decoded samples; that
+    // misfired on idle systems (e.g. only `/rosout` from the daemon) and
+    // was unhelpful even when correct — the user wanted a topic viewer,
+    // not a diagnostics gate.
+    let _ = init_tx.send(Ok(()));
 
     loop {
         if shutdown_rx.try_recv().is_ok() {
-            if !init_sent {
-                let _ = init_tx.send(Err(anyhow::anyhow!(
-                    "spin thread shut down before peer probe completed"
-                )));
-            }
             break;
         }
 
         if last_poll.elapsed() >= GRAPH_POLL_INTERVAL {
             last_poll = Instant::now();
             if let Ok(nt) = node.get_topic_names_and_types() {
-                let current: HashSet<String> = nt.keys().cloned().collect();
+                let current: std::collections::HashSet<String> = nt.keys().cloned().collect();
 
-                // Additions
                 for (name, types) in &nt {
                     if known.contains_key(name) {
                         continue;
@@ -178,7 +158,6 @@ fn spin_loop(
                         .get_publishers_info_by_topic(name, false)
                         .unwrap_or_default();
                     let publishers = pubs_info.len() as u32;
-                    let foreign_pub = pubs_info.iter().any(|p| p.node_name != SELF_NODE_NAME);
                     let _ = event_tx.send(BackendEvent::Topic {
                         name: name.clone(),
                         type_name: ty.clone(),
@@ -186,25 +165,28 @@ fn spin_loop(
                         subscribers: 0,
                     });
                     known.insert(name.clone(), ty.clone());
-                    if foreign_pub {
-                        foreign_topics.insert(name.clone());
-                    }
 
-                    // Spawn a per-topic sample forwarder. Uses subscribe_raw
-                    // for accurate wire-byte counts, then decodes the CDR
-                    // payload to a DynamicValue via WrappedNativeMsgUntyped.
+                    // Per-topic sample forwarder. subscribe_raw for accurate
+                    // wire-byte counts; decode via WrappedNativeMsgUntyped.
                     if let Ok(stream) = node.subscribe_raw(name, ty, r2r::QosProfile::default()) {
                         let name_owned = name.clone();
                         let ty_owned = ty.clone();
                         let tx = event_tx.clone();
-                        let counter = samples_received.clone();
                         let _ = spawner.spawn_local(async move {
                             let mut stream = stream;
                             let mut decoder =
                                 r2r::WrappedNativeMsgUntyped::new_from(&ty_owned).ok();
+                            let mut emitted_decode_failure = false;
                             while let Some(bytes) = stream.next().await {
-                                counter.fetch_add(1, Ordering::Relaxed);
-                                let value = decode_sample(decoder.as_mut(), &bytes);
+                                let (value, decode_failed) =
+                                    decode_sample(decoder.as_mut(), &bytes);
+                                if decode_failed && !emitted_decode_failure {
+                                    emitted_decode_failure = true;
+                                    let _ = tx.send(BackendEvent::DecodeFailure {
+                                        topic: name_owned.clone(),
+                                        type_name: ty_owned.clone(),
+                                    });
+                                }
                                 if tx
                                     .send(BackendEvent::Sample {
                                         name: name_owned.clone(),
@@ -214,14 +196,13 @@ fn spin_loop(
                                     })
                                     .is_err()
                                 {
-                                    break; // receiver dropped → bail out
+                                    break;
                                 }
                             }
                         });
                     }
                 }
 
-                // Removals
                 let gone: Vec<String> = known
                     .keys()
                     .filter(|k| !current.contains(*k))
@@ -229,42 +210,39 @@ fn spin_loop(
                     .collect();
                 for name in gone {
                     known.remove(&name);
-                    foreign_topics.remove(&name);
                     let _ = event_tx.send(BackendEvent::TopicRemoved(name));
-                    // Sample task for this topic will exit on next Sample failure or remain dormant.
                 }
             }
         }
 
         node.spin_once(SPIN_TICK);
         pool.run_until_stalled();
-
-        if !init_sent && Instant::now() >= probe_deadline {
-            init_sent = true;
-            let samples = samples_received.load(Ordering::Relaxed);
-            if !foreign_topics.is_empty() && samples == 0 {
-                let _ = init_tx.send(Err(peer_mismatch_error(&foreign_topics)));
-                return;
-            }
-            let _ = init_tx.send(Ok(()));
-        }
     }
 }
 
 /// Decode one raw CDR sample into a `DynamicValue`.
 ///
-/// Returns `DynamicValue::Bytes(len)` if the decoder is missing (type support
-/// not available at build time) or any step of the decode fails — keeps the
-/// row visible in the inspector with at least the wire size.
-fn decode_sample(decoder: Option<&mut r2r::WrappedNativeMsgUntyped>, bytes: &[u8]) -> DynamicValue {
-    if let Some(d) = decoder {
-        if d.from_serialized_bytes(bytes).is_ok() {
-            if let Ok(json) = d.to_json() {
-                return json_to_dynamic(json);
+/// Returns `(DynamicValue::Bytes(len), false)` if no decoder is compiled in
+/// for this type (missing type-support — a different error class, not a
+/// mismatch). Returns `(DynamicValue::Bytes(len), true)` if a decoder exists
+/// but `from_serialized_bytes` / `to_json` fails — the signature of a ROS 2
+/// distro or RMW mismatch on the wire. Callers use the boolean to decide
+/// whether to emit a `BackendEvent::DecodeFailure`.
+fn decode_sample(
+    decoder: Option<&mut r2r::WrappedNativeMsgUntyped>,
+    bytes: &[u8],
+) -> (DynamicValue, bool) {
+    match decoder {
+        None => (DynamicValue::Bytes(bytes.len()), false),
+        Some(d) => {
+            if d.from_serialized_bytes(bytes).is_ok() {
+                if let Ok(json) = d.to_json() {
+                    return (json_to_dynamic(json), false);
+                }
             }
+            (DynamicValue::Bytes(bytes.len()), true)
         }
     }
-    DynamicValue::Bytes(bytes.len())
 }
 
 /// Cutoff above which an all-primitive array is replaced by `ArrayElided`
@@ -329,32 +307,6 @@ fn is_json_leaf_primitive(v: &serde_json::Value) -> bool {
     )
 }
 
-fn peer_mismatch_error(foreign_topics: &HashSet<String>) -> anyhow::Error {
-    let count = foreign_topics.len();
-    let mut preview: Vec<&str> = foreign_topics.iter().take(5).map(String::as_str).collect();
-    preview.sort_unstable();
-    let extra = count.saturating_sub(preview.len());
-    let extra_str = if extra > 0 {
-        format!(" (+{extra} more)")
-    } else {
-        String::new()
-    };
-    let plural = if count == 1 { "" } else { "s" };
-    let probe_secs = PROBE_DURATION.as_secs();
-    let topics = preview.join(", ");
-    let target_distro = env!("ROSTOP_TARGET_DISTRO");
-    let target_rmw = env!("ROSTOP_TARGET_RMW");
-    anyhow::anyhow!(
-        "Discovered {count} foreign-published topic{plural} but received zero samples in {probe_secs}s. \
-         This is the signature of a ROS 2 distro or RMW mismatch: rostop was built against \
-         {target_distro} + {target_rmw}, and peers on a different distro or RMW trigger CDR decode \
-         failures (\"sequence size exceeds remaining buffer\" on the robot side). \
-         Topics seen: {topics}{extra_str}. \
-         Rebuild rostop against the target distro / RMW (e.g. `just run-live-humble` for a \
-         Humble + rmw_fastrtps_cpp peer), or set {SKIP_PROBE_ENV}=1 to bypass."
-    )
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -392,8 +344,11 @@ mod tests {
     #[test]
     fn decode_sample_falls_back_to_bytes_when_no_decoder() {
         let payload = [1u8, 2, 3, 4];
-        let v = decode_sample(None, &payload);
+        let (v, failed) = decode_sample(None, &payload);
         assert_eq!(v, DynamicValue::Bytes(4));
+        // Missing type-support is a different error class from a distro/RMW
+        // mismatch — don't treat it as a decode failure.
+        assert!(!failed);
     }
 
     #[test]

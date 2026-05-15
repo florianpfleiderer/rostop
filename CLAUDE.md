@@ -87,3 +87,49 @@ This is why every dev recipe is distro-suffixed, why there are two Dockerfiles, 
 - `Dockerfile.jazzy` / `Dockerfile.humble` — dev images. Adding `Dockerfile.<distro>` is the supported way to add distro support; no other code changes required for builds.
 - `crates/rostop-cli/build.rs` — stamps `ROS_DISTRO` / `RMW_IMPLEMENTATION` into the binary so error messages can name the build target.
 - `CLAUDE.local.md` — gitignored; use for personal scratch notes you don't want to commit.
+
+## AI-assisted workflow
+
+The maintainer drives issue work through Claude Code with the `superpowers` skill set. Skills are auto-discovered each session (see the `using-superpowers` skill loaded at startup) — this section codifies *when* to reach for them on this repo.
+
+### Per-issue loop
+
+1. **One feature branch per GitHub issue.** Name it after the change type, not the issue number: `feat/<slug>`, `fix/<slug>`, `docs/<slug>`, `build/<slug>`, `hotfix/<slug>`. Use `gh issue list` to see what's open.
+2. **Work in a git worktree** when the issue is non-trivial or touches files you have open elsewhere. Invoke the `using-git-worktrees` skill — it sets up an isolated checkout so the main workspace stays clean and parallel issue work doesn't cross-contaminate.
+3. **Atomic commits.** Each commit should be a single coherent change that builds and passes tests on its own. Don't bundle "fix bug + reformat + rename" into one commit; reviewers (and `git bisect`) will thank you. Conventional Commits (`feat(cli):`, `fix(core):`, …) — scope to the crate when applicable.
+4. **Open the PR early** (`gh pr create`) and push follow-up commits to it. Don't accumulate a 10-commit branch locally before anyone sees it.
+5. **Update `CHANGELOG.md`** under `## [Unreleased]` for any user-visible change *in the same PR*, not a follow-up.
+
+### Which skill, when
+
+- **Starting a new feature or non-trivial change** → `brainstorming` first. Don't jump to code on a "let's add X" request; the skill exists because rostop's scope is deliberately narrow ("passive inspector, htop-shaped" — see CONTRIBUTING.md). Confirm the change fits the project's scope and the two-crate split before writing.
+- **Multi-step implementation** → `writing-plans` to draft, `executing-plans` (or `subagent-driven-development` if tasks are independent) to carry it out. Plans are cheap insurance against half-finished refactors.
+- **Bug investigation** → `systematic-debugging` before proposing a fix. Especially important for live-backend bugs where the bug might be in r2r, DDS, the RMW, or our code — guessing wastes time.
+- **Independent searches or refactors** → `dispatching-parallel-agents` to run them concurrently. Skill choice here is purely about parallelism, not correctness.
+- **Before claiming done** → `verification-before-completion`. For rostop, "done" means the *specific* commands in the next subsection have been run and shown green.
+- **Before merging** → `requesting-code-review` on the branch. Catches the "looks fine to me" failure mode.
+- **TDD-shaped changes in `rostop-core`** → `test-driven-development`. Pure-logic code with no ROS dependency is the ideal TDD target; prefer it over integration tests in `rostop-cli` whenever the logic can be exercised without ROS.
+
+### Verification gates
+
+"All tests pass" is not a thing you can claim without running these:
+
+| Scope                      | Command                                                  |
+| -------------------------- | -------------------------------------------------------- |
+| Touched `rostop-core` only | `just test-core-<distro>`                                |
+| Touched `rostop-cli`       | `just test-<distro>` (runs the live integration tests)   |
+| Cross-distro change        | Both `just test-jazzy` *and* `just test-humble`          |
+| Always                     | `just fmt-<distro>` and `just clippy-<distro>` (`-D warnings`) |
+
+CI runs both distros on every PR. Don't skip the matching local run just because CI will catch it — the feedback loop is much faster locally, and you stay out of the "push, wait, push, wait" anti-pattern.
+
+### What to avoid
+
+- **Don't pull `r2r` or any `ros-*` crate into `rostop-core`.** The boundary is the point of the architecture; once broken it stays broken. If you need ROS state in core code, the design is wrong — add the data to `BackendEvent` and let the UI plumb it through.
+- **Don't override `RMW_IMPLEMENTATION`** to make cross-distro / cross-RMW peers "work." The peer probe will refuse, and for good reason — the binary is linked against one specific stack. Pick the matching `just run-<distro>` recipe instead.
+- **Don't add features behind a feature flag without thinking** — the only feature gate is `live`, and it exists because the entire `r2r` toolchain is heavy. New cargo features need a real reason.
+- **Don't write planning / decision / "what I'm about to do" markdown files.** Work from conversation context. The exceptions are `CHANGELOG.md` (user-facing), and explicit plan documents the user asks for (saved under `docs/superpowers/plans/`).
+
+### Memory and `docs/superpowers/plans/`
+
+`docs/superpowers/plans/` is where plans created via the `writing-plans` skill get committed when they outlive a single session (e.g. multi-day refactors). Most plans are session-scoped and don't go here. Personal session memory lives outside the repo (in `~/.claude/projects/`) — don't commit that.

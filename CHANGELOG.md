@@ -33,6 +33,14 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   a topic viewer, not a diagnostics gate. The `ROSTOP_SKIP_PEER_PROBE` env
   var is gone with it (no probe means no skip needed). Distro/RMW mismatches
   are now surfaced passively via the new INFO hint above.
+- **`.deb` release-artifact filenames** now put the version before the
+  distro, matching the tarball convention. The new pattern is
+  `rostop-<version>-<distro>_1_amd64.deb` (was
+  `rostop-<distro>_<version>-1_amd64.deb`). The internal apt package name
+  is still `rostop-humble` / `rostop-jazzy` — only the filename changes,
+  so `apt install ./<file>.deb` and `apt list --installed` work
+  identically. Install scripts that pin the old filename will need a
+  one-line update; the new URL is in the release notes and README.
 
 ### Fixed
 

@@ -78,7 +78,7 @@ DISTRO=humble                        # or jazzy
 
 # Option A — .deb (recommended; apt pulls missing ros-<distro>-* message packages)
 curl -L -o rostop-${DISTRO}.deb \
-  https://github.com/florianpfleiderer/rostop/releases/download/${TAG}/rostop-${DISTRO}_${VERSION}-1_amd64.deb
+  https://github.com/florianpfleiderer/rostop/releases/download/${TAG}/rostop-${VERSION}-${DISTRO}_1_amd64.deb
 sudo apt install ./rostop-${DISTRO}.deb
 
 # Option B — tarball (assumes the ros-<distro>-* message packages are already installed)
@@ -98,8 +98,8 @@ rostop
 If you need to produce artifacts off-CI (e.g. an unreleased branch), the `just` recipes wrap the same `cargo-deb` invocation:
 
 ```bash
-just package-humble        # → dist/rostop-humble_<ver>-1_amd64.deb
-just package-jazzy         # → dist/rostop-jazzy_<ver>-1_amd64.deb
+just package-humble        # → dist/rostop-<ver>-humble_1_amd64.deb
+just package-jazzy         # → dist/rostop-<ver>-jazzy_1_amd64.deb
 ```
 
 ### All Just recipes

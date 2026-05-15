@@ -5,8 +5,10 @@ name: Release
 #   git tag v0.1.0 && git push origin v0.1.0
 #
 # Each distro produces:
-#   * rostop-<version>-<distro>-x86_64.tar.gz  (bare binary, README, LICENSE)
-#   * rostop-<distro>_<version>-1_amd64.deb   (declares ros-<distro>-* deps)
+#   * rostop-<version>-<distro>-x86_64.tar.gz   (bare binary, README, LICENSE)
+#   * rostop-<version>-<distro>_1_amd64.deb    (declares ros-<distro>-* deps;
+#                                               internal apt name is still
+#                                               rostop-<distro>)
 # Both are built with `--features live` against the matching `ros:<distro>-ros-base`
 # image, so the binary links the right `rcl` / `rmw` / message-package shared libs.
 on:
@@ -83,6 +85,7 @@ jobs:
       - name: cargo deb (variant = ${{ matrix.distro }})
         shell: bash
         run: |
+          set -euxo pipefail
           # --no-build: reuse the binary we just produced at target/release/rostop.
           # The `--features live` from the build step has already been baked in.
           mkdir -p dist
@@ -91,6 +94,16 @@ jobs:
             -p rostop-cli \
             --no-build \
             --output dist/
+          # cargo-deb produces rostop-<distro>_<ver>-<rev>_amd64.deb. Reshape
+          # it to rostop-<ver>-<distro>_<rev>_amd64.deb so the artifact name
+          # matches the tarball pattern (version before distro). The package
+          # metadata (apt name = rostop-<distro>) is unchanged — only the
+          # filename moves; `apt install ./<file>.deb` reads metadata, not
+          # the filename.
+          REF="${{ inputs.tag || github.ref_name }}"
+          VERSION="${REF#v}"
+          mv "dist/rostop-${{ matrix.distro }}_${VERSION}-1_amd64.deb" \
+             "dist/rostop-${VERSION}-${{ matrix.distro }}_1_amd64.deb"
 
       - name: Package tarball
         id: package
@@ -157,8 +170,8 @@ jobs:
 
           | Distro | Ubuntu | Tarball | .deb |
           | --- | --- | --- | --- |
-          | Humble | 22.04 | rostop-${VERSION}-humble-x86_64.tar.gz | rostop-humble_${VERSION}-1_amd64.deb |
-          | Jazzy  | 24.04 | rostop-${VERSION}-jazzy-x86_64.tar.gz  | rostop-jazzy_${VERSION}-1_amd64.deb  |
+          | Humble | 22.04 | rostop-${VERSION}-humble-x86_64.tar.gz | rostop-${VERSION}-humble_1_amd64.deb |
+          | Jazzy  | 24.04 | rostop-${VERSION}-jazzy-x86_64.tar.gz  | rostop-${VERSION}-jazzy_1_amd64.deb  |
 
           ### Install (Humble / Ubuntu 22.04)
 
@@ -166,7 +179,7 @@ jobs:
 
           \`\`\`bash
           curl -L -o rostop-humble.deb \\
-            https://github.com/${REPO}/releases/download/${TAG}/rostop-humble_${VERSION}-1_amd64.deb
+            https://github.com/${REPO}/releases/download/${TAG}/rostop-${VERSION}-humble_1_amd64.deb
           sudo apt install ./rostop-humble.deb
           source /opt/ros/humble/setup.bash
           rostop

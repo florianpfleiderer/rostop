@@ -459,7 +459,7 @@ fn render_status_bar(f: &mut Frame, area: Rect, app: &App) {
     } else {
         match app.focus {
             Focus::Topics => {
-                "j/k:move  l:inspect  Enter:fullscreen  /:filter  s:sort  r:reverse  p:pause  g/G:top/bot  q:quit"
+                "j/k:move  l:inspect  Enter:fullscreen  /:filter  s:sort  p:pause  g/G:top/bot  q:quit"
             }
             Focus::Inspector => {
                 "j/k:move  l:drill-in  h:drill-out/back  g/G:top/bot  p:pause  q:quit"

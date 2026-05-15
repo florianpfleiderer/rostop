@@ -31,7 +31,7 @@
 │  · y: 0                                                        ││                                          │
 │  · z: 0.2968074739870145                                       ││                                          │
 └────────────────────────────────────────────────────────────────┘└──────────────────────────────────────────┘
-[LIVE]  sort:Hz Descending   j/k:move  /:filter  s:sort  r:reverse  p:pause  g/G:top/bot  q:quit
+[LIVE]  sort:Hz Descending   j/k:move  /:filter  s:sort  p:pause  g/G:top/bot  q:quit
 ```
 
 ## Why
@@ -181,8 +181,7 @@ If that's empty, rostop will be empty too — fix discovery first.
 | `h` / `←`      | step **out**: pop one inspector level, or return focus to the topic table when already at the message root |
 | `Enter`        | from the topic table, open a **fullscreen** single-topic panel (bigger metrics, wider sparklines, full-width message tree). `Esc` returns to the split-pane layout |
 | `/`            | edit filter (Esc clears, Enter confirms) |
-| `s`            | cycle sort key (Hz → BW → Type → Name) |
-| `r`            | reverse sort order                |
+| `s`            | cycle sort key (Name → Hz → BW → Type). Order auto-flips: Name/Type ascending, Hz/BW descending |
 | `p`            | pause / resume sample ingestion   |
 | `q` / `Ctrl-C` | quit                              |
 

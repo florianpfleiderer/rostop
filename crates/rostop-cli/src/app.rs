@@ -86,8 +86,8 @@ impl App {
             registry: TopicRegistry::new(),
             start: Instant::now(),
             selected: 0,
-            sort_key: SortKey::Hz,
-            sort_order: SortOrder::Descending,
+            sort_key: SortKey::Name,
+            sort_order: SortOrder::Ascending,
             filter: String::new(),
             filter_editing: false,
             paused: false,
@@ -265,12 +265,14 @@ impl App {
             SortKey::Bandwidth => SortKey::Type,
             SortKey::Type => SortKey::Name,
         };
-    }
-
-    fn toggle_order(&mut self) {
-        self.sort_order = match self.sort_order {
-            SortOrder::Ascending => SortOrder::Descending,
-            SortOrder::Descending => SortOrder::Ascending,
+        // Pick the order that makes sense for each key — names and types
+        // read most naturally alphabetical, rates and bandwidths are most
+        // useful highest-first. There is no `r` binding to flip this; if
+        // a per-key override becomes a real need, add it back behind a
+        // separate keybind rather than re-exposing the global toggle.
+        self.sort_order = match self.sort_key {
+            SortKey::Name | SortKey::Type => SortOrder::Ascending,
+            SortKey::Hz | SortKey::Bandwidth => SortOrder::Descending,
         };
     }
 }
@@ -448,7 +450,6 @@ fn event_loop(terminal: &mut Terminal<CrosstermBackend<Stdout>>, app: &mut App) 
                         app.filter_editing = true;
                     }
                     (KeyCode::Char('s'), _, _) => app.cycle_sort(),
-                    (KeyCode::Char('r'), _, _) => app.toggle_order(),
                     (KeyCode::Char('p'), _, _) => app.paused = !app.paused,
                     _ => {}
                 }
@@ -524,5 +525,53 @@ mod tests {
             type_name: "sensor_msgs/msg/LaserScan".into(),
         }]);
         assert_eq!(app.notice.as_deref(), Some(first.as_str()));
+    }
+
+    #[test]
+    fn default_sort_is_name_ascending() {
+        // Regression for #18 — a busy system constantly reshuffles equal-Hz
+        // rows under "Hz Descending", so the user lands on a moving target.
+        // Calmer default: Name ascending.
+        let backend: Box<dyn RosBackend> = Box::new(DemoBackend::new());
+        let app = App::new(backend);
+        assert_eq!(app.sort_key, SortKey::Name);
+        assert_eq!(app.sort_order, SortOrder::Ascending);
+    }
+
+    #[test]
+    fn cycle_sort_snaps_order_to_a_sensible_default_per_key() {
+        // Cycling Name -> Hz must flip to Descending so the user doesn't
+        // get the slowest-first surprise. Type -> Name returns to
+        // alphabetical Ascending.
+        let backend: Box<dyn RosBackend> = Box::new(DemoBackend::new());
+        let mut app = App::new(backend);
+        assert_eq!(
+            (app.sort_key, app.sort_order),
+            (SortKey::Name, SortOrder::Ascending)
+        );
+
+        app.cycle_sort();
+        assert_eq!(
+            (app.sort_key, app.sort_order),
+            (SortKey::Hz, SortOrder::Descending)
+        );
+
+        app.cycle_sort();
+        assert_eq!(
+            (app.sort_key, app.sort_order),
+            (SortKey::Bandwidth, SortOrder::Descending)
+        );
+
+        app.cycle_sort();
+        assert_eq!(
+            (app.sort_key, app.sort_order),
+            (SortKey::Type, SortOrder::Ascending)
+        );
+
+        app.cycle_sort();
+        assert_eq!(
+            (app.sort_key, app.sort_order),
+            (SortKey::Name, SortOrder::Ascending)
+        );
     }
 }

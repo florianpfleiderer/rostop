@@ -1,7 +1,7 @@
 //! Pure data preparation for the topic table.
 //!
 //! Building rendering rows is a deterministic function of (registry state,
-//! sort/filter settings, now timestamp), so it's tested without spinning up a
+//! sort settings, now timestamp), so it's tested without spinning up a
 //! terminal.
 
 use rostop_core::registry::{SortKey, SortOrder, TopicRegistry};
@@ -25,25 +25,16 @@ pub struct TopicTableRow {
 
 /// Build the list of topic rows for display.
 ///
-/// `filter` is a case-insensitive substring matched against the topic name or
-/// type. `now_ns` is used to evaluate rate/bandwidth in the registry's rolling
-/// window.
+/// `now_ns` is used to evaluate rate/bandwidth in the registry's rolling window.
 pub fn build_rows(
     registry: &TopicRegistry,
     sort_key: SortKey,
     sort_order: SortOrder,
-    filter: &str,
     now_ns: u64,
 ) -> Vec<TopicTableRow> {
     let sorted = registry.sorted_by(sort_key, sort_order, now_ns);
-    let q = filter.to_lowercase();
     sorted
         .into_iter()
-        .filter(|e| {
-            q.is_empty()
-                || e.name.to_lowercase().contains(&q)
-                || e.type_name.to_lowercase().contains(&q)
-        })
         .map(|e| TopicTableRow {
             name: e.name.clone(),
             type_name: e.type_name.clone(),

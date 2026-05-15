@@ -111,17 +111,6 @@ impl TopicRegistry {
         }
     }
 
-    /// Returns entries whose name or type contains `query` (case-insensitive).
-    pub fn filtered(&self, query: &str) -> Vec<&TopicEntry> {
-        let q = query.to_lowercase();
-        self.entries
-            .values()
-            .filter(|e| {
-                e.name.to_lowercase().contains(&q) || e.type_name.to_lowercase().contains(&q)
-            })
-            .collect()
-    }
-
     /// Entries sorted by `key`. Rate-based sorts use the rolling window ending at `now_ns`.
     pub fn sorted_by(&self, key: SortKey, order: SortOrder, now_ns: u64) -> Vec<&TopicEntry> {
         let mut out: Vec<&TopicEntry> = self.entries.values().collect();

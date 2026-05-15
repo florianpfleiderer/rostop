@@ -6,6 +6,51 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+
+- **Default sort is now `Name` ascending** instead of `Hz` descending. On a
+  busy system, similarly-rated topics swap places visibly every second and
+  the user lands on a moving target the moment they open the TUI — alphabetical
+  is a calmer starting view that lets them find a specific topic without
+  fighting the sort. (Closes #18.)
+- **`s` (cycle sort key) now also picks a sensible order for the new key**:
+  `Name` and `Type` snap to ascending, `Hz` and `Bandwidth` snap to
+  descending. The previous behaviour silently kept whatever order was
+  active, which produced surprising results like "Hz ascending" (slowest
+  topic first) right after cycling from Name.
+- **Status-bar sort indicator uses filled triangles.** `sort:Hz▼` /
+  `sort:Name▲` instead of `sort:Hz Descending` / `sort:Name Ascending`.
+  Same information, ~10 columns shorter — keeps the help string readable
+  in 80-column terminals. `▼` follows the htop / `top` convention (high
+  values flow downward, i.e. listed first); filled triangles render
+  more crisply than ↑/↓ arrows in low-quality terminal fonts.
+- **Focus mode is now opened with `f`** (was `Enter`). The status-bar mode
+  label is `[FOCUS]` and the panel title is `focus ─ {topic} ─ …`. Pressing
+  `f` again exits focus mode (`Esc` still works too), so the user can
+  toggle in and out without moving off the same key. The `Enter` key keeps
+  its other meaning — descending one level inside the inspector pane.
+
+### Removed
+
+- **The `r` "reverse sort order" keybinding** and its help-bar hint.
+  Sort direction is now derived from the sort key (see above) and no longer
+  user-toggleable. If a per-key override becomes a real need, add it back
+  behind a separate binding rather than re-exposing the global toggle.
+- **The `/` filter feature.** The `/` keybinding, the `filter:` field on
+  `App`, the `filter` parameter on `ui::rows::build_rows`, the
+  `TopicRegistry::filtered` method in `rostop-core`, the `[FILTER: …]`
+  status-bar mode and its trailing `filter:""` debug suffix, and the
+  `build_rows_applies_filter` / `filter_by_substring_matches_name_or_type`
+  tests are all gone. With sort defaulting to `Name` ascending and a
+  manageable topic count on most systems, the substring filter was unused
+  in practice; if a real need resurfaces, see how `r` came back as a
+  potential per-key override above — keep the new binding scoped.
+- **`g` / `G` jump-to-top / jump-to-bottom** in all three contexts
+  (topic table, inspector pane, focus mode). The status-bar help string
+  is shorter as a result; `j`/`k` still move one row at a time and the
+  topic table auto-scrolls under the cursor, so the user never gets
+  stranded off-screen.
+
 ### Added
 
 - **Status-bar mismatch hint.** When a `subscribe_raw` payload fails to decode

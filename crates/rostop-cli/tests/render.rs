@@ -112,11 +112,10 @@ fn selecting_a_row_below_the_table_area_keeps_it_on_screen() {
 }
 
 #[test]
-fn fullscreen_mode_swaps_layout_to_a_single_topic_panel() {
+fn focus_mode_swaps_layout_to_a_single_topic_panel() {
     let mut handle = AppHandle::demo();
     handle.tick(Duration::from_millis(250));
 
-    // Pick the topic that's deterministically at the top of an Hz-descending sort.
     handle.app.fullscreen = true;
     handle.app.selected = 0;
 
@@ -134,28 +133,28 @@ fn fullscreen_mode_swaps_layout_to_a_single_topic_panel() {
         .collect::<Vec<_>>()
         .join("\n");
 
-    // Fullscreen layout markers — title bar carries "fullscreen ─", status
-    // bar shows the [FULLSCREEN] mode, help text mentions Esc, and the
-    // ordinary split-pane chrome ("inspector ─", "rates ─") is gone.
+    // Focus-mode layout markers — title bar carries "focus ─", status bar
+    // shows the [FOCUS] mode, help text mentions Esc, and the ordinary
+    // split-pane chrome ("inspector ─", "rates ─") is gone.
     assert!(
-        dump.contains("fullscreen ─"),
-        "expected fullscreen title in buffer:\n{dump}"
+        dump.contains("focus ─"),
+        "expected focus title in buffer:\n{dump}"
     );
     assert!(
-        dump.contains("[FULLSCREEN]"),
-        "expected [FULLSCREEN] mode label in status bar:\n{dump}"
+        dump.contains("[FOCUS]"),
+        "expected [FOCUS] mode label in status bar:\n{dump}"
     );
     assert!(
-        dump.contains("Esc:back"),
-        "expected Esc:back hint in status bar:\n{dump}"
+        dump.contains("f/Esc:back"),
+        "expected f/Esc:back hint in status bar (f toggles focus mode, Esc still works):\n{dump}"
     );
     assert!(
         !dump.contains("inspector ─"),
-        "split-pane inspector chrome should not render in fullscreen:\n{dump}"
+        "split-pane inspector chrome should not render in focus mode:\n{dump}"
     );
     assert!(
         !dump.contains("rates ─"),
-        "split-pane sparkline chrome should not render in fullscreen:\n{dump}"
+        "split-pane sparkline chrome should not render in focus mode:\n{dump}"
     );
 }
 

@@ -48,13 +48,7 @@ pub mod test_support {
     pub fn render_once(terminal: &mut Terminal<TestBackend>, app_handle: &mut AppHandle) {
         let app = &mut app_handle.app;
         let elapsed_ns = app.elapsed_ns();
-        let rows = ui::rows::build_rows(
-            &app.registry,
-            app.sort_key,
-            app.sort_order,
-            &app.filter,
-            elapsed_ns,
-        );
+        let rows = ui::rows::build_rows(&app.registry, app.sort_key, app.sort_order, elapsed_ns);
         let selected_topic = rows.get(app.selected).map(|r| r.name.clone());
         app.sync_inspector_for_topic(selected_topic.as_deref());
         let _: io::Result<()> = terminal

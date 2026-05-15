@@ -34,8 +34,6 @@ pub struct App {
     pub selected: usize,
     pub sort_key: SortKey,
     pub sort_order: SortOrder,
-    pub filter: String,
-    pub filter_editing: bool,
     pub paused: bool,
     pub last_message: HashMap<String, DynamicValue>,
     pub hz_sparks: HashMap<String, Sparkline>,
@@ -59,11 +57,14 @@ pub struct App {
     /// table area.
     pub topic_table_state: TableState,
     /// When true, the UI replaces the split-pane layout with a single
-    /// dedicated panel for the currently-selected topic. Set by Enter from
-    /// the topics pane, cleared by Esc. Inspector drill state
-    /// (`inspector_path` / `inspector_selected`) is shared between the
-    /// inspector pane and fullscreen, so leaving fullscreen preserves the
-    /// drill position.
+    /// dedicated panel for the currently-selected topic — the "focus" mode.
+    /// Set by `f` from the topics pane, cleared by `Esc`. Inspector drill
+    /// state (`inspector_path` / `inspector_selected`) is shared between
+    /// the inspector pane and focus mode, so leaving focus preserves the
+    /// drill position. The field is named `fullscreen` because that's what
+    /// the layout *does* (one panel filling the screen); the user-facing
+    /// name is "focus" because that's what it *means* — zooming in on a
+    /// single topic.
     pub fullscreen: bool,
 }
 
@@ -86,10 +87,8 @@ impl App {
             registry: TopicRegistry::new(),
             start: Instant::now(),
             selected: 0,
-            sort_key: SortKey::Hz,
-            sort_order: SortOrder::Descending,
-            filter: String::new(),
-            filter_editing: false,
+            sort_key: SortKey::Name,
+            sort_order: SortOrder::Ascending,
             paused: false,
             last_message: HashMap::new(),
             hz_sparks: HashMap::new(),
@@ -265,12 +264,14 @@ impl App {
             SortKey::Bandwidth => SortKey::Type,
             SortKey::Type => SortKey::Name,
         };
-    }
-
-    fn toggle_order(&mut self) {
-        self.sort_order = match self.sort_order {
-            SortOrder::Ascending => SortOrder::Descending,
-            SortOrder::Descending => SortOrder::Ascending,
+        // Pick the order that makes sense for each key — names and types
+        // read most naturally alphabetical, rates and bandwidths are most
+        // useful highest-first. There is no `r` binding to flip this; if
+        // a per-key override becomes a real need, add it back behind a
+        // separate keybind rather than re-exposing the global toggle.
+        self.sort_order = match self.sort_key {
+            SortKey::Name | SortKey::Type => SortOrder::Ascending,
+            SortKey::Hz | SortKey::Bandwidth => SortOrder::Descending,
         };
     }
 }
@@ -292,13 +293,7 @@ fn event_loop(terminal: &mut Terminal<CrosstermBackend<Stdout>>, app: &mut App) 
         app.tick_sparklines();
 
         let elapsed_ns = app.elapsed_ns();
-        let rows = ui::rows::build_rows(
-            &app.registry,
-            app.sort_key,
-            app.sort_order,
-            &app.filter,
-            elapsed_ns,
-        );
+        let rows = ui::rows::build_rows(&app.registry, app.sort_key, app.sort_order, elapsed_ns);
         if app.selected >= rows.len() {
             app.selected = rows.len().saturating_sub(1);
         }
@@ -320,29 +315,17 @@ fn event_loop(terminal: &mut Terminal<CrosstermBackend<Stdout>>, app: &mut App) 
                 if key.kind != KeyEventKind::Press {
                     continue;
                 }
-                if app.filter_editing {
-                    match key.code {
-                        KeyCode::Esc => {
-                            app.filter.clear();
-                            app.filter_editing = false;
-                        }
-                        KeyCode::Enter => app.filter_editing = false,
-                        KeyCode::Backspace => {
-                            app.filter.pop();
-                        }
-                        KeyCode::Char(c) => app.filter.push(c),
-                        _ => {}
-                    }
-                    continue;
-                }
                 if app.fullscreen {
-                    // Fullscreen mode shows a single dedicated topic panel
-                    // and only honours j/k drill keys + Esc/q. Sort, filter,
-                    // and table navigation are intentionally inert here.
+                    // Focus mode shows a single dedicated topic panel and
+                    // only honours j/k drill keys + f/Esc/q. Sort and
+                    // table navigation are intentionally inert here.
                     match (key.code, key.modifiers) {
                         (KeyCode::Char('q'), _) => break,
                         (KeyCode::Char('c'), KeyModifiers::CONTROL) => break,
-                        (KeyCode::Esc, _) => {
+                        // `f` toggles focus mode on the way in and on the
+                        // way out, so the user can keep their hand on the
+                        // same key. `Esc` works too for muscle memory.
+                        (KeyCode::Esc, _) | (KeyCode::Char('f'), _) => {
                             app.fullscreen = false;
                         }
                         (KeyCode::Char('j'), _) | (KeyCode::Down, _) => {
@@ -350,16 +333,6 @@ fn event_loop(terminal: &mut Terminal<CrosstermBackend<Stdout>>, app: &mut App) 
                         }
                         (KeyCode::Char('k'), _) | (KeyCode::Up, _) => {
                             app.move_inspector(-1, selected_topic.as_deref());
-                        }
-                        (KeyCode::Char('g'), _) => {
-                            app.inspector_selected = 0;
-                        }
-                        (KeyCode::Char('G'), _) => {
-                            let len = app
-                                .inspector_message(selected_topic.as_deref())
-                                .map(|m| level_rows(m, &app.inspector_path).len())
-                                .unwrap_or(0);
-                            app.inspector_selected = len.saturating_sub(1);
                         }
                         (KeyCode::Char('l'), _) | (KeyCode::Right, _) | (KeyCode::Enter, _) => {
                             app.drill_in(selected_topic.as_deref());
@@ -386,31 +359,23 @@ fn event_loop(terminal: &mut Terminal<CrosstermBackend<Stdout>>, app: &mut App) 
                     (KeyCode::Char('k'), _, Focus::Topics) | (KeyCode::Up, _, Focus::Topics) => {
                         app.move_selection(-1, rows.len());
                     }
-                    (KeyCode::Char('g'), _, Focus::Topics) => app.selected = 0,
-                    (KeyCode::Char('G'), _, Focus::Topics) => {
-                        app.selected = rows.len().saturating_sub(1);
-                    }
                     // From the topics pane, `l`/`→` moves focus down into
-                    // the inspector pane. `Enter` is reserved for the
-                    // fullscreen single-topic view (see Focus::Inspector
-                    // arm below for the inspector drill).
+                    // the inspector pane; `f` enters focus mode (a
+                    // single-topic full-screen panel).
                     (KeyCode::Char('l'), _, Focus::Topics) | (KeyCode::Right, _, Focus::Topics) => {
                         if app.inspector_message(selected_topic.as_deref()).is_some() {
                             app.focus = Focus::Inspector;
                             app.inspector_selected = 0;
                         }
                     }
-                    (KeyCode::Enter, _, Focus::Topics) => {
-                        // Only enter fullscreen if we have a topic to show
+                    (KeyCode::Char('f'), _, Focus::Topics) => {
+                        // Only enter focus mode if we have a topic to show
                         // — empty registry shouldn't lock us into a blank
                         // single-topic panel with no way to drill anything.
                         if selected_topic.is_some() {
                             app.fullscreen = true;
-                            // Leave focus on Topics. The fullscreen key
-                            // handler intercepts every key regardless of
-                            // focus, and keeping focus=Topics means
-                            // Esc-leaves-fullscreen lands the user back on
-                            // the table pane they came from.
+                            // Leave focus pane = Topics so Esc lands the
+                            // user back on the table they came from.
                             app.inspector_selected = 0;
                         }
                     }
@@ -423,16 +388,6 @@ fn event_loop(terminal: &mut Terminal<CrosstermBackend<Stdout>>, app: &mut App) 
                     | (KeyCode::Up, _, Focus::Inspector) => {
                         app.move_inspector(-1, selected_topic.as_deref());
                     }
-                    (KeyCode::Char('g'), _, Focus::Inspector) => {
-                        app.inspector_selected = 0;
-                    }
-                    (KeyCode::Char('G'), _, Focus::Inspector) => {
-                        let len = app
-                            .inspector_message(selected_topic.as_deref())
-                            .map(|m| level_rows(m, &app.inspector_path).len())
-                            .unwrap_or(0);
-                        app.inspector_selected = len.saturating_sub(1);
-                    }
                     (KeyCode::Char('l'), _, Focus::Inspector)
                     | (KeyCode::Right, _, Focus::Inspector)
                     | (KeyCode::Enter, _, Focus::Inspector) => {
@@ -444,11 +399,7 @@ fn event_loop(terminal: &mut Terminal<CrosstermBackend<Stdout>>, app: &mut App) 
                         app.drill_out();
                     }
                     // Global keys (work regardless of focus).
-                    (KeyCode::Char('/'), _, _) => {
-                        app.filter_editing = true;
-                    }
                     (KeyCode::Char('s'), _, _) => app.cycle_sort(),
-                    (KeyCode::Char('r'), _, _) => app.toggle_order(),
                     (KeyCode::Char('p'), _, _) => app.paused = !app.paused,
                     _ => {}
                 }
@@ -524,5 +475,53 @@ mod tests {
             type_name: "sensor_msgs/msg/LaserScan".into(),
         }]);
         assert_eq!(app.notice.as_deref(), Some(first.as_str()));
+    }
+
+    #[test]
+    fn default_sort_is_name_ascending() {
+        // Regression for #18 — a busy system constantly reshuffles equal-Hz
+        // rows under "Hz Descending", so the user lands on a moving target.
+        // Calmer default: Name ascending.
+        let backend: Box<dyn RosBackend> = Box::new(DemoBackend::new());
+        let app = App::new(backend);
+        assert_eq!(app.sort_key, SortKey::Name);
+        assert_eq!(app.sort_order, SortOrder::Ascending);
+    }
+
+    #[test]
+    fn cycle_sort_snaps_order_to_a_sensible_default_per_key() {
+        // Cycling Name -> Hz must flip to Descending so the user doesn't
+        // get the slowest-first surprise. Type -> Name returns to
+        // alphabetical Ascending.
+        let backend: Box<dyn RosBackend> = Box::new(DemoBackend::new());
+        let mut app = App::new(backend);
+        assert_eq!(
+            (app.sort_key, app.sort_order),
+            (SortKey::Name, SortOrder::Ascending)
+        );
+
+        app.cycle_sort();
+        assert_eq!(
+            (app.sort_key, app.sort_order),
+            (SortKey::Hz, SortOrder::Descending)
+        );
+
+        app.cycle_sort();
+        assert_eq!(
+            (app.sort_key, app.sort_order),
+            (SortKey::Bandwidth, SortOrder::Descending)
+        );
+
+        app.cycle_sort();
+        assert_eq!(
+            (app.sort_key, app.sort_order),
+            (SortKey::Type, SortOrder::Ascending)
+        );
+
+        app.cycle_sort();
+        assert_eq!(
+            (app.sort_key, app.sort_order),
+            (SortKey::Name, SortOrder::Ascending)
+        );
     }
 }

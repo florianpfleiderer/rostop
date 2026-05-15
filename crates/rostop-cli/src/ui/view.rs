@@ -6,6 +6,7 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Cell, Paragraph, Row, Table};
 use ratatui::Frame;
 use rostop_core::message::{level_rows, path_segments};
+use rostop_core::registry::SortOrder;
 
 use crate::app::{App, Focus};
 use crate::ui::rows::{fmt_bps, TopicTableRow};
@@ -61,7 +62,7 @@ fn render_fullscreen_topic(f: &mut Frame, area: Rect, app: &App, rows: &[TopicTa
         // the table.
         let block = Block::default()
             .borders(Borders::ALL)
-            .title(" fullscreen ─ (no topic) ");
+            .title(" focus ─ (no topic) ");
         f.render_widget(
             Paragraph::new(Line::from("  (the selected topic disappeared — press Esc)"))
                 .block(block),
@@ -71,7 +72,7 @@ fn render_fullscreen_topic(f: &mut Frame, area: Rect, app: &App, rows: &[TopicTa
     };
 
     let title = format!(
-        " fullscreen ─ {} ─ {} ─ {}+{} ",
+        " focus ─ {} ─ {} ─ {}+{} ",
         row.name,
         row.type_name,
         option_env!("ROSTOP_TARGET_DISTRO").unwrap_or("?"),
@@ -444,26 +445,28 @@ fn render_sparklines(f: &mut Frame, area: Rect, app: &App, rows: &[TopicTableRow
 }
 
 fn render_status_bar(f: &mut Frame, area: Rect, app: &App) {
-    let mode = if app.filter_editing {
-        format!("[FILTER: {}_]", app.filter)
-    } else if app.fullscreen {
-        "[FULLSCREEN]".to_string()
+    let mode = if app.fullscreen {
+        "[FOCUS]".to_string()
     } else if app.paused {
         "[PAUSED]".to_string()
     } else {
         "[LIVE]".to_string()
     };
-    let sort = format!("sort:{:?} {:?}", app.sort_key, app.sort_order);
+    // Filled triangles follow the htop / `top` convention: ▼ for Descending
+    // (high values flow downward — i.e. listed first) and ▲ for Ascending.
+    // Tight enough to keep the status bar readable in 80-column terminals
+    // and crisper than ↑/↓ arrows in low-quality terminal fonts.
+    let arrow = match app.sort_order {
+        SortOrder::Ascending => "▲",
+        SortOrder::Descending => "▼",
+    };
+    let sort = format!("sort:{:?}{arrow}", app.sort_key);
     let help = if app.fullscreen {
-        "j/k:move  l/Enter:drill-in  h:drill-out  g/G:top/bot  Esc:back  q:quit"
+        "j/k:move  l/Enter:drill-in  h:drill-out  f/Esc:back  q:quit"
     } else {
         match app.focus {
-            Focus::Topics => {
-                "j/k:move  l:inspect  Enter:fullscreen  /:filter  s:sort  r:reverse  p:pause  g/G:top/bot  q:quit"
-            }
-            Focus::Inspector => {
-                "j/k:move  l:drill-in  h:drill-out/back  g/G:top/bot  p:pause  q:quit"
-            }
+            Focus::Topics => "j/k:move  l:inspect  f:focus  s:sort  p:pause  q:quit",
+            Focus::Inspector => "j/k:move  l:drill-in  h:drill-out/back  p:pause  q:quit",
         }
     };
     let mut spans = vec![
@@ -478,7 +481,6 @@ fn render_status_bar(f: &mut Frame, area: Rect, app: &App) {
         Span::styled(sort, Style::default().fg(Color::Cyan)),
         Span::raw("   "),
         Span::styled(help, Style::default().fg(Color::DarkGray)),
-        Span::raw(format!("  filter:{:?}", app.filter)),
     ];
     if let Some(notice) = app.notice.as_deref() {
         spans.push(Span::raw("   "));

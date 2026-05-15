@@ -71,7 +71,15 @@ package-jazzy:
     mkdir -p dist
     ROSTOP_DISTRO=jazzy ./scripts/dev.sh \
         "cargo deb --variant jazzy -p rostop-cli --features live --output /work/dist/"
-    cd dist && sha256sum rostop-jazzy_*.deb | tee SHA256SUMS.jazzy
+    # cargo-deb produces rostop-jazzy_<ver>-<rev>_amd64.deb. Reshape it to
+    # rostop-<ver>-jazzy_<rev>_amd64.deb so the version sits before the
+    # distro, matching the tarball convention. The internal apt package
+    # name is still rostop-jazzy (set in Cargo.toml deb variant metadata).
+    cd dist
+    old=$(ls rostop-jazzy_*.deb)
+    new=$(echo "$old" | sed -E 's/^rostop-jazzy_(.*)-([0-9]+)_amd64\.deb$/rostop-\1-jazzy_\2_amd64.deb/')
+    mv "$old" "$new"
+    sha256sum rostop-*-jazzy_*_amd64.deb | tee SHA256SUMS.jazzy
 
 # --- Humble ---------------------------------------------------------------
 
@@ -133,7 +141,12 @@ package-humble:
     mkdir -p dist
     ROSTOP_DISTRO=humble ./scripts/dev.sh \
         "cargo deb --variant humble -p rostop-cli --features live --output /work/dist/"
-    cd dist && sha256sum rostop-humble_*.deb | tee SHA256SUMS.humble
+    # See package-jazzy for the rename rationale.
+    cd dist
+    old=$(ls rostop-humble_*.deb)
+    new=$(echo "$old" | sed -E 's/^rostop-humble_(.*)-([0-9]+)_amd64\.deb$/rostop-\1-humble_\2_amd64.deb/')
+    mv "$old" "$new"
+    sha256sum rostop-*-humble_*_amd64.deb | tee SHA256SUMS.humble
 
 # --- Core-only (no ROS link) ----------------------------------------------
 #

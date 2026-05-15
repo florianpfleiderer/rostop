@@ -32,6 +32,15 @@ fn inspector_empty_state(idle_secs: u64, publishers: u32, subscribers: u32) -> S
 
 pub fn render(f: &mut Frame, app: &mut App, rows: &[TopicTableRow]) {
     let area = f.area();
+    if app.fullscreen {
+        let chunks = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([Constraint::Min(8), Constraint::Length(1)])
+            .split(area);
+        render_fullscreen_topic(f, chunks[0], app, rows);
+        render_status_bar(f, chunks[1], app);
+        return;
+    }
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
@@ -43,6 +52,142 @@ pub fn render(f: &mut Frame, app: &mut App, rows: &[TopicTableRow]) {
     render_topic_table(f, chunks[0], app, rows);
     render_bottom(f, chunks[1], app, rows);
     render_status_bar(f, chunks[2], app);
+}
+
+fn render_fullscreen_topic(f: &mut Frame, area: Rect, app: &App, rows: &[TopicTableRow]) {
+    let Some(row) = rows.get(app.selected) else {
+        // Registry emptied out from under us — fall through to a stub
+        // panel rather than panicking. Esc will land the user back on
+        // the table.
+        let block = Block::default()
+            .borders(Borders::ALL)
+            .title(" fullscreen ─ (no topic) ");
+        f.render_widget(
+            Paragraph::new(Line::from("  (the selected topic disappeared — press Esc)"))
+                .block(block),
+            area,
+        );
+        return;
+    };
+
+    let title = format!(
+        " fullscreen ─ {} ─ {} ─ {}+{} ",
+        row.name,
+        row.type_name,
+        option_env!("ROSTOP_TARGET_DISTRO").unwrap_or("?"),
+        option_env!("ROSTOP_TARGET_RMW").unwrap_or("?"),
+    );
+
+    let outer = Block::default()
+        .borders(Borders::ALL)
+        .border_style(border_style(true))
+        .title(title);
+    let inner = outer.inner(area);
+    f.render_widget(outer, area);
+
+    // Top metrics strip (5 lines) above the message tree fills the rest.
+    let layout = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Length(6), Constraint::Min(1)])
+        .split(inner);
+
+    render_fullscreen_metrics(f, layout[0], app, row);
+    render_fullscreen_message_tree(f, layout[1], app, &row.name);
+}
+
+fn render_fullscreen_metrics(f: &mut Frame, area: Rect, app: &App, row: &TopicTableRow) {
+    // Sparklines are wider than in the side panel — eat ~half the row.
+    let hz_spark = app
+        .hz_sparks
+        .get(&row.name)
+        .map(|s| s.render())
+        .unwrap_or_else(|| " ".repeat(28));
+    let bw_spark = app
+        .bw_sparks
+        .get(&row.name)
+        .map(|s| s.render())
+        .unwrap_or_else(|| " ".repeat(28));
+
+    let yellow = Style::default().fg(Color::Yellow);
+    let lines = vec![
+        Line::from(vec![
+            Span::styled("HZ      ", Style::default().fg(Color::Cyan)),
+            Span::styled(format!("{:>8.1}", row.hz), yellow),
+            Span::raw("   "),
+            Span::styled(hz_spark, Style::default().fg(Color::Cyan)),
+        ]),
+        Line::from(vec![
+            Span::styled("BW      ", Style::default().fg(Color::Magenta)),
+            Span::styled(format!("{:>8}", fmt_bps(row.bps)), yellow),
+            Span::raw("   "),
+            Span::styled(bw_spark, Style::default().fg(Color::Magenta)),
+        ]),
+        Line::from(vec![
+            Span::styled("JIT     ", Style::default().fg(Color::Blue)),
+            Span::styled(format!("{:>5.1} ms", row.jitter_ms), yellow),
+        ]),
+        Line::from(vec![
+            Span::styled("PUB/SUB ", Style::default().fg(Color::Green)),
+            Span::styled(format!("{}/{}", row.publishers, row.subscribers), yellow),
+        ]),
+        Line::from(vec![
+            Span::styled("IDLE    ", Style::default().fg(Color::DarkGray)),
+            Span::styled(format!("{} s", row.idle_secs), yellow),
+        ]),
+    ];
+    f.render_widget(Paragraph::new(lines), area);
+}
+
+fn render_fullscreen_message_tree(f: &mut Frame, area: Rect, app: &App, topic_name: &str) {
+    let block = Block::default()
+        .borders(Borders::TOP)
+        .border_style(Style::default().fg(Color::DarkGray))
+        .title(Line::from(vec![
+            Span::styled(" message", Style::default().fg(Color::Cyan)),
+            Span::raw(" "),
+            {
+                let message = app.last_message.get(topic_name);
+                if let Some(msg) = message {
+                    let segs = path_segments(msg, &app.inspector_path);
+                    if segs.is_empty() {
+                        Span::raw("")
+                    } else {
+                        Span::styled(
+                            format!("> {} ", segs.join(" > ")),
+                            Style::default().fg(Color::DarkGray),
+                        )
+                    }
+                } else {
+                    Span::raw("")
+                }
+            },
+        ]));
+    let inner = block.inner(area);
+    f.render_widget(block, area);
+
+    let message = app.last_message.get(topic_name);
+    let lines: Vec<Line> = match message {
+        Some(value) => {
+            let level = level_rows(value, &app.inspector_path);
+            if level.is_empty() {
+                vec![Line::from(Span::styled(
+                    "  (no fields at this level)",
+                    Style::default().fg(Color::DarkGray),
+                ))]
+            } else {
+                level
+                    .into_iter()
+                    .enumerate()
+                    .map(|(i, r)| render_level_line(i, r, true, app.inspector_selected))
+                    .collect()
+            }
+        }
+        None => vec![Line::from(Span::styled(
+            "  (no message yet)",
+            Style::default().fg(Color::DarkGray),
+        ))],
+    };
+    f.render_widget(Paragraph::new(lines), inner);
 }
 
 fn render_topic_table(f: &mut Frame, area: Rect, app: &mut App, rows: &[TopicTableRow]) {
@@ -301,17 +446,25 @@ fn render_sparklines(f: &mut Frame, area: Rect, app: &App, rows: &[TopicTableRow
 fn render_status_bar(f: &mut Frame, area: Rect, app: &App) {
     let mode = if app.filter_editing {
         format!("[FILTER: {}_]", app.filter)
+    } else if app.fullscreen {
+        "[FULLSCREEN]".to_string()
     } else if app.paused {
         "[PAUSED]".to_string()
     } else {
         "[LIVE]".to_string()
     };
     let sort = format!("sort:{:?} {:?}", app.sort_key, app.sort_order);
-    let help = match app.focus {
-        Focus::Topics => {
-            "j/k:move  l:inspect  /:filter  s:sort  r:reverse  p:pause  g/G:top/bot  q:quit"
+    let help = if app.fullscreen {
+        "j/k:move  l/Enter:drill-in  h:drill-out  g/G:top/bot  Esc:back  q:quit"
+    } else {
+        match app.focus {
+            Focus::Topics => {
+                "j/k:move  l:inspect  Enter:fullscreen  /:filter  s:sort  r:reverse  p:pause  g/G:top/bot  q:quit"
+            }
+            Focus::Inspector => {
+                "j/k:move  l:drill-in  h:drill-out/back  g/G:top/bot  p:pause  q:quit"
+            }
         }
-        Focus::Inspector => "j/k:move  l:drill-in  h:drill-out/back  g/G:top/bot  p:pause  q:quit",
     };
     let mut spans = vec![
         Span::styled(

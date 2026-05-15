@@ -177,8 +177,9 @@ If that's empty, rostop will be empty too — fix discovery first.
 | `j` / `↓`      | move selection down (in focused pane) |
 | `k` / `↑`      | move selection up (in focused pane)   |
 | `g` / `G`      | jump to top / bottom              |
-| `l` / `→` / `Enter` | step **into** the selected item: from the topic table moves focus to the inspector; from the inspector descends into the selected struct/array field |
+| `l` / `→`      | step **into** the selected item: from the topic table moves focus to the inspector; from the inspector descends into the selected struct/array field |
 | `h` / `←`      | step **out**: pop one inspector level, or return focus to the topic table when already at the message root |
+| `Enter`        | from the topic table, open a **fullscreen** single-topic panel (bigger metrics, wider sparklines, full-width message tree). `Esc` returns to the split-pane layout |
 | `/`            | edit filter (Esc clears, Enter confirms) |
 | `s`            | cycle sort key (Hz → BW → Type → Name) |
 | `r`            | reverse sort order                |

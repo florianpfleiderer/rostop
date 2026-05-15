@@ -6,6 +6,16 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- **Status-bar mismatch hint.** When a `subscribe_raw` payload fails to decode
+  against the type-support compiled into this build (the signature of a ROS 2
+  distro / RMW mismatch — e.g. a Jazzy-built rostop subscribed to a Humble
+  peer), the status bar shows a single sticky `INFO: possible distro/RMW
+  mismatch — built against {target_distro}+{target_rmw}, some samples failed
+  to decode` line. Emitted at most once per process so a torrent of foreign
+  samples doesn't churn the message.
+
 ### Changed
 
 - **Startup is now non-blocking.** Removed the 2 s peer-mismatch probe that
@@ -13,7 +23,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   samples. The check misfired on idle systems (e.g. the ROS 2 daemon's
   `/rosout` with no traffic) and was unhelpful even when correct — rostop is
   a topic viewer, not a diagnostics gate. The `ROSTOP_SKIP_PEER_PROBE` env
-  var is gone with it (no probe means no skip needed).
+  var is gone with it (no probe means no skip needed). Distro/RMW mismatches
+  are now surfaced passively via the new INFO hint above.
 
 ## [0.1.0] - 2026-05-14
 

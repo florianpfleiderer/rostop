@@ -159,7 +159,7 @@ Environment variables (read from the calling shell, forwarded into the container
 Caveats:
 
 - `--network=host` is Linux-only. On macOS / Windows Docker Desktop, host networking does not bridge to the LAN; use a native install or run the container inside a Linux VM that's on the robot's network.
-- Cross-distro / cross-RMW peers don't work — `r2r` is linked against one specific stack and CDR decode will fail on samples from peers built against another. rostop will still open and show the topic graph, but samples won't decode. Pick the matching recipe instead of overriding `RMW_IMPLEMENTATION`.
+- Cross-distro / cross-RMW peers don't work — `r2r` is linked against one specific stack and CDR decode will fail on samples from peers built against another. rostop will still open and show the topic graph, and the status bar will surface a one-shot `INFO: possible distro/RMW mismatch …` hint once it sees a sample fail to decode. Pick the matching recipe instead of overriding `RMW_IMPLEMENTATION`.
 - Multicast must reach between host and target. Different subnets / restrictive switches break discovery — fall back to `CYCLONEDDS_URI` with explicit unicast peers (Jazzy) or a similar Fast DDS peer-list XML (Humble).
 
 Sanity check from inside the container (`just shell-jazzy` / `just shell-humble`, then):

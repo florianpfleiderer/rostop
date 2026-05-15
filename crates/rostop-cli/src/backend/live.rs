@@ -176,8 +176,17 @@ fn spin_loop(
                             let mut stream = stream;
                             let mut decoder =
                                 r2r::WrappedNativeMsgUntyped::new_from(&ty_owned).ok();
+                            let mut emitted_decode_failure = false;
                             while let Some(bytes) = stream.next().await {
-                                let value = decode_sample(decoder.as_mut(), &bytes);
+                                let (value, decode_failed) =
+                                    decode_sample(decoder.as_mut(), &bytes);
+                                if decode_failed && !emitted_decode_failure {
+                                    emitted_decode_failure = true;
+                                    let _ = tx.send(BackendEvent::DecodeFailure {
+                                        topic: name_owned.clone(),
+                                        type_name: ty_owned.clone(),
+                                    });
+                                }
                                 if tx
                                     .send(BackendEvent::Sample {
                                         name: name_owned.clone(),
@@ -213,18 +222,27 @@ fn spin_loop(
 
 /// Decode one raw CDR sample into a `DynamicValue`.
 ///
-/// Returns `DynamicValue::Bytes(len)` if the decoder is missing (type support
-/// not available at build time) or any step of the decode fails — keeps the
-/// row visible in the inspector with at least the wire size.
-fn decode_sample(decoder: Option<&mut r2r::WrappedNativeMsgUntyped>, bytes: &[u8]) -> DynamicValue {
-    if let Some(d) = decoder {
-        if d.from_serialized_bytes(bytes).is_ok() {
-            if let Ok(json) = d.to_json() {
-                return json_to_dynamic(json);
+/// Returns `(DynamicValue::Bytes(len), false)` if no decoder is compiled in
+/// for this type (missing type-support — a different error class, not a
+/// mismatch). Returns `(DynamicValue::Bytes(len), true)` if a decoder exists
+/// but `from_serialized_bytes` / `to_json` fails — the signature of a ROS 2
+/// distro or RMW mismatch on the wire. Callers use the boolean to decide
+/// whether to emit a `BackendEvent::DecodeFailure`.
+fn decode_sample(
+    decoder: Option<&mut r2r::WrappedNativeMsgUntyped>,
+    bytes: &[u8],
+) -> (DynamicValue, bool) {
+    match decoder {
+        None => (DynamicValue::Bytes(bytes.len()), false),
+        Some(d) => {
+            if d.from_serialized_bytes(bytes).is_ok() {
+                if let Ok(json) = d.to_json() {
+                    return (json_to_dynamic(json), false);
+                }
             }
+            (DynamicValue::Bytes(bytes.len()), true)
         }
     }
-    DynamicValue::Bytes(bytes.len())
 }
 
 /// Cutoff above which an all-primitive array is replaced by `ArrayElided`
@@ -326,8 +344,11 @@ mod tests {
     #[test]
     fn decode_sample_falls_back_to_bytes_when_no_decoder() {
         let payload = [1u8, 2, 3, 4];
-        let v = decode_sample(None, &payload);
+        let (v, failed) = decode_sample(None, &payload);
         assert_eq!(v, DynamicValue::Bytes(4));
+        // Missing type-support is a different error class from a distro/RMW
+        // mismatch — don't treat it as a decode failure.
+        assert!(!failed);
     }
 
     #[test]

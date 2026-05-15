@@ -31,6 +31,13 @@ pub enum BackendEvent {
         value: DynamicValue,
         at: Instant,
     },
+    /// A sample arrived but the CDR payload failed to decode against the
+    /// type-support compiled into this build. Signature of a ROS 2
+    /// distro / RMW mismatch (e.g. a Jazzy-built rostop subscribed to a
+    /// Humble peer): the bytes come through, but `from_serialized_bytes`
+    /// fails. Emitted at most once per (topic, type_name) so a torrent
+    /// of foreign samples doesn't drown the channel.
+    DecodeFailure { topic: String, type_name: String },
 }
 
 /// Backend trait — sources of `BackendEvent`s.

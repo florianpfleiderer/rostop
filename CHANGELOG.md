@@ -19,9 +19,10 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   active, which produced surprising results like "Hz ascending" (slowest
   topic first) right after cycling from Name.
 - **Focus mode is now opened with `f`** (was `Enter`). The status-bar mode
-  label is `[FOCUS]` and the panel title is `focus ─ {topic} ─ …`. The
-  `Enter` key keeps its other meaning — descending one level inside the
-  inspector pane.
+  label is `[FOCUS]` and the panel title is `focus ─ {topic} ─ …`. Pressing
+  `f` again exits focus mode (`Esc` still works too), so the user can
+  toggle in and out without moving off the same key. The `Enter` key keeps
+  its other meaning — descending one level inside the inspector pane.
 
 ### Removed
 

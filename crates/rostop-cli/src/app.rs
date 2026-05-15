@@ -317,12 +317,15 @@ fn event_loop(terminal: &mut Terminal<CrosstermBackend<Stdout>>, app: &mut App) 
                 }
                 if app.fullscreen {
                     // Focus mode shows a single dedicated topic panel and
-                    // only honours j/k drill keys + Esc/q. Sort and table
-                    // navigation are intentionally inert here.
+                    // only honours j/k drill keys + f/Esc/q. Sort and
+                    // table navigation are intentionally inert here.
                     match (key.code, key.modifiers) {
                         (KeyCode::Char('q'), _) => break,
                         (KeyCode::Char('c'), KeyModifiers::CONTROL) => break,
-                        (KeyCode::Esc, _) => {
+                        // `f` toggles focus mode on the way in and on the
+                        // way out, so the user can keep their hand on the
+                        // same key. `Esc` works too for muscle memory.
+                        (KeyCode::Esc, _) | (KeyCode::Char('f'), _) => {
                             app.fullscreen = false;
                         }
                         (KeyCode::Char('j'), _) | (KeyCode::Down, _) => {

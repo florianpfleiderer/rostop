@@ -145,8 +145,8 @@ fn focus_mode_swaps_layout_to_a_single_topic_panel() {
         "expected [FOCUS] mode label in status bar:\n{dump}"
     );
     assert!(
-        dump.contains("Esc:back"),
-        "expected Esc:back hint in status bar:\n{dump}"
+        dump.contains("f/Esc:back"),
+        "expected f/Esc:back hint in status bar (f toggles focus mode, Esc still works):\n{dump}"
     );
     assert!(
         !dump.contains("inspector ─"),

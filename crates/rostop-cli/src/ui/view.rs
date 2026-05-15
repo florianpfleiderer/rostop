@@ -453,7 +453,7 @@ fn render_status_bar(f: &mut Frame, area: Rect, app: &App) {
     };
     let sort = format!("sort:{:?} {:?}", app.sort_key, app.sort_order);
     let help = if app.fullscreen {
-        "j/k:move  l/Enter:drill-in  h:drill-out  Esc:back  q:quit"
+        "j/k:move  l/Enter:drill-in  h:drill-out  f/Esc:back  q:quit"
     } else {
         match app.focus {
             Focus::Topics => "j/k:move  l:inspect  f:focus  s:sort  p:pause  q:quit",

@@ -11,6 +11,7 @@ use crossterm::terminal::{
     disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen,
 };
 use ratatui::backend::CrosstermBackend;
+use ratatui::widgets::TableState;
 use ratatui::Terminal;
 use rostop_core::message::{level_rows, DynamicValue};
 use rostop_core::registry::{SortKey, SortOrder, TopicRegistry};
@@ -52,6 +53,11 @@ pub struct App {
     /// Sticky status-bar notice — set once on the first decode failure to hint
     /// at a possible distro/RMW mismatch. Cleared only by restarting rostop.
     pub notice: Option<String>,
+    /// Ratatui table state for the topics pane. Persists `offset` between
+    /// frames so `render_stateful_widget` can auto-scroll the viewport to
+    /// keep the selected row visible when the registry grows past the
+    /// table area.
+    pub topic_table_state: TableState,
 }
 
 impl App {
@@ -87,6 +93,7 @@ impl App {
             inspector_selected: 0,
             inspector_topic: None,
             notice: None,
+            topic_table_state: TableState::default(),
         }
     }
 

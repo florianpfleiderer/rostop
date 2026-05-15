@@ -26,6 +26,15 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   var is gone with it (no probe means no skip needed). Distro/RMW mismatches
   are now surfaced passively via the new INFO hint above.
 
+### Fixed
+
+- **Topic table auto-scrolls to keep the selected row visible.** Previously,
+  on a terminal too short to display every discovered topic, pressing `j`/`G`
+  past the last visible row moved `app.selected` off-screen and the
+  highlight disappeared. The table is now rendered via
+  `render_stateful_widget` with a `TableState` that tracks the selected
+  index, so ratatui scrolls the viewport to follow the cursor.
+
 ## [0.1.0] - 2026-05-14
 
 First public release. Inspect a live ROS 2 graph from the terminal.

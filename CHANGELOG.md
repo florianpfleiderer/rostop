@@ -6,6 +6,15 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+
+- **Startup is now non-blocking.** Removed the 2 s peer-mismatch probe that
+  refused to open the TUI when foreign publishers were seen with zero decoded
+  samples. The check misfired on idle systems (e.g. the ROS 2 daemon's
+  `/rosout` with no traffic) and was unhelpful even when correct — rostop is
+  a topic viewer, not a diagnostics gate. The `ROSTOP_SKIP_PEER_PROBE` env
+  var is gone with it (no probe means no skip needed).
+
 ## [0.1.0] - 2026-05-14
 
 First public release. Inspect a live ROS 2 graph from the terminal.

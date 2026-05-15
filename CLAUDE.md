@@ -130,6 +130,25 @@ CI runs both distros on every PR. Don't skip the matching local run just because
 - **Don't add features behind a feature flag without thinking** — the only feature gate is `live`, and it exists because the entire `r2r` toolchain is heavy. New cargo features need a real reason.
 - **Don't write planning / decision / "what I'm about to do" markdown files.** Work from conversation context. The exceptions are `CHANGELOG.md` (user-facing), and explicit plan documents the user asks for (saved under `docs/superpowers/plans/`).
 
+### Ask before running — costly or side-effect-y commands
+
+The `.claude/settings.json` allowlist exists so trivial reads (status / log / `cargo check`) don't prompt. It is **not** a license to run anything that fits the glob pattern. The commands below have outsized side effects on this repo specifically — confirm with the user before invoking them, even if a glob technically permits it.
+
+- **`just image-<distro>`** — builds the Jazzy/Humble dev image from scratch. ~10 minutes cold, downloads several hundred MB. Never run this speculatively; ask whether the user has it built already (`docker image inspect rostop-dev:<distro>` is read-only and fine).
+- **`just test-<distro>`, `just build-<distro>`, `just clippy-<distro>`, `just fmt-<distro>`** — all route through `scripts/dev.sh` and will trigger `docker build` if the image isn't present. Once the image exists they're cheap, but cold-start cost is hidden behind the recipe name. Ask before the first invocation of a session, or run `docker image inspect rostop-dev:<distro>` first to confirm the image exists.
+- **`just run-<distro>`** (without `-- --demo`) — opens the TUI inside a `--network=host --ipc=host` container and connects to whatever real ROS 2 system the user has on their LAN. It takes over the terminal, may interfere with debugging the user is doing on the same robot, and is not something to run "to check." Use `-- --demo` if you genuinely need to exercise the binary; otherwise ask.
+- **`just package-<distro>`** — full release build of the `.deb`. Long compile, writes to `dist/`. Only run when the user is preparing a release.
+- **`cargo clean` / `just clean-<distro>`** — wipes the per-distro `rostop-target-<distro>` Docker volume. The next build will be cold and slow. Don't run this to "reset" something — diagnose the actual problem first.
+- **`cargo update`** — touches `Cargo.lock` and can cascade into unintended dep bumps across the workspace. Only run when the user has explicitly asked to update dependencies.
+- **`docker build`, `docker volume rm`, `docker system prune`, `docker rmi`** — all destructive to the cached dev environment. The user has spent real time building these images and volumes; don't blow them away.
+- **Any `gh` command that writes** (`gh pr create`, `gh pr merge`, `gh pr comment`, `gh issue create`, `gh issue close`, `gh release create`) — visible to others. The allowlist permits `gh issue/pr/run view/list`, which are read-only; everything else needs explicit user go-ahead.
+- **`git push`, `git push --force`, `git reset --hard`, `git rebase`, `git branch -D`, `git checkout -- <files>`** — none are in the allowlist, but listed here so you don't ask "why didn't this work" — they need explicit approval. Force-push and reset are off-limits unless the user names them specifically.
+- **Long-running background processes** (`cargo run`, `cargo watch`, anything that doesn't terminate on its own) — start them only when the user has asked for a running process, and always tell them you've done it so they can clean it up.
+- **Modifying `Cargo.lock` by hand, files in `dist/`, files in `target/`** — `Cargo.lock` is managed by cargo, `dist/` is release artifacts, `target/` is build output. None are hand-edited.
+- **Editing `CHANGELOG.md` sections other than `## [Unreleased]`** — released-version entries are historical record. Only add to `[Unreleased]`.
+
+Rule of thumb: if you're about to run something that takes more than ~30s, opens a network socket, mutates shared state (git remote, GitHub, Docker volumes), or holds the terminal, **ask first**. Reading the code, running `cargo check`, running `rg`/`fd`, and reading PR/issue state never need permission.
+
 ### Memory and `docs/superpowers/plans/`
 
 `docs/superpowers/plans/` is where plans created via the `writing-plans` skill get committed when they outlive a single session (e.g. multi-day refactors). Most plans are session-scoped and don't go here. Personal session memory lives outside the repo (in `~/.claude/projects/`) — don't commit that.

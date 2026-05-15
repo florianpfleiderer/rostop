@@ -15,6 +15,14 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   mismatch — built against {target_distro}+{target_rmw}, some samples failed
   to decode` line. Emitted at most once per process so a torrent of foreign
   samples doesn't churn the message.
+- **Fullscreen single-topic view.** Pressing `Enter` on a row in the topic
+  table now hides the split-pane layout and dedicates the whole terminal to
+  the selected topic: large metrics block (Hz, BW, jitter, pub/sub counts,
+  idle seconds), wider Hz and BW sparklines, and a full-width decoded
+  message tree with the same `j`/`k`/`l`/`h` drill keys as the inspector
+  pane. `Esc` returns to the split-pane layout, preserving the drill path.
+  Publisher / subscriber lists and per-topic QoS are not surfaced yet —
+  follow-ups to issue #15.
 
 ### Changed
 

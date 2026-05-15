@@ -58,6 +58,13 @@ pub struct App {
     /// keep the selected row visible when the registry grows past the
     /// table area.
     pub topic_table_state: TableState,
+    /// When true, the UI replaces the split-pane layout with a single
+    /// dedicated panel for the currently-selected topic. Set by Enter from
+    /// the topics pane, cleared by Esc. Inspector drill state
+    /// (`inspector_path` / `inspector_selected`) is shared between the
+    /// inspector pane and fullscreen, so leaving fullscreen preserves the
+    /// drill position.
+    pub fullscreen: bool,
 }
 
 impl App {
@@ -94,6 +101,7 @@ impl App {
             inspector_topic: None,
             notice: None,
             topic_table_state: TableState::default(),
+            fullscreen: false,
         }
     }
 
@@ -327,6 +335,47 @@ fn event_loop(terminal: &mut Terminal<CrosstermBackend<Stdout>>, app: &mut App) 
                     }
                     continue;
                 }
+                if app.fullscreen {
+                    // Fullscreen mode shows a single dedicated topic panel
+                    // and only honours j/k drill keys + Esc/q. Sort, filter,
+                    // and table navigation are intentionally inert here.
+                    match (key.code, key.modifiers) {
+                        (KeyCode::Char('q'), _) => break,
+                        (KeyCode::Char('c'), KeyModifiers::CONTROL) => break,
+                        (KeyCode::Esc, _) => {
+                            app.fullscreen = false;
+                        }
+                        (KeyCode::Char('j'), _) | (KeyCode::Down, _) => {
+                            app.move_inspector(1, selected_topic.as_deref());
+                        }
+                        (KeyCode::Char('k'), _) | (KeyCode::Up, _) => {
+                            app.move_inspector(-1, selected_topic.as_deref());
+                        }
+                        (KeyCode::Char('g'), _) => {
+                            app.inspector_selected = 0;
+                        }
+                        (KeyCode::Char('G'), _) => {
+                            let len = app
+                                .inspector_message(selected_topic.as_deref())
+                                .map(|m| level_rows(m, &app.inspector_path).len())
+                                .unwrap_or(0);
+                            app.inspector_selected = len.saturating_sub(1);
+                        }
+                        (KeyCode::Char('l'), _) | (KeyCode::Right, _) | (KeyCode::Enter, _) => {
+                            app.drill_in(selected_topic.as_deref());
+                        }
+                        (KeyCode::Char('h'), _) | (KeyCode::Left, _) => {
+                            // Only pops the inspector path; don't fall back
+                            // to focus-change like Focus::Inspector's drill_out.
+                            if !app.inspector_path.is_empty() {
+                                app.drill_out();
+                            }
+                        }
+                        (KeyCode::Char('p'), _) => app.paused = !app.paused,
+                        _ => {}
+                    }
+                    continue;
+                }
                 match (key.code, key.modifiers, app.focus) {
                     (KeyCode::Char('q'), _, _) => break,
                     (KeyCode::Char('c'), KeyModifiers::CONTROL, _) => break,
@@ -341,14 +390,27 @@ fn event_loop(terminal: &mut Terminal<CrosstermBackend<Stdout>>, app: &mut App) 
                     (KeyCode::Char('G'), _, Focus::Topics) => {
                         app.selected = rows.len().saturating_sub(1);
                     }
-                    // Drill into the inspector. From the topics pane, `l`
-                    // moves focus down into the message. From within the
-                    // inspector, `l` descends one more level.
-                    (KeyCode::Char('l'), _, Focus::Topics)
-                    | (KeyCode::Right, _, Focus::Topics)
-                    | (KeyCode::Enter, _, Focus::Topics) => {
+                    // From the topics pane, `l`/`→` moves focus down into
+                    // the inspector pane. `Enter` is reserved for the
+                    // fullscreen single-topic view (see Focus::Inspector
+                    // arm below for the inspector drill).
+                    (KeyCode::Char('l'), _, Focus::Topics) | (KeyCode::Right, _, Focus::Topics) => {
                         if app.inspector_message(selected_topic.as_deref()).is_some() {
                             app.focus = Focus::Inspector;
+                            app.inspector_selected = 0;
+                        }
+                    }
+                    (KeyCode::Enter, _, Focus::Topics) => {
+                        // Only enter fullscreen if we have a topic to show
+                        // — empty registry shouldn't lock us into a blank
+                        // single-topic panel with no way to drill anything.
+                        if selected_topic.is_some() {
+                            app.fullscreen = true;
+                            // Leave focus on Topics. The fullscreen key
+                            // handler intercepts every key regardless of
+                            // focus, and keeping focus=Topics means
+                            // Esc-leaves-fullscreen lands the user back on
+                            // the table pane they came from.
                             app.inspector_selected = 0;
                         }
                     }

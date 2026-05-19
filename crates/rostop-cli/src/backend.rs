@@ -10,6 +10,7 @@
 
 use std::time::{Duration, Instant};
 
+use rostop_core::endpoint::EndpointInfo;
 use rostop_core::message::DynamicValue;
 
 /// Events flowing from the backend into the application state.
@@ -38,6 +39,14 @@ pub enum BackendEvent {
     /// fails. Emitted at most once per (topic, type_name) so a torrent
     /// of foreign samples doesn't drown the channel.
     DecodeFailure { topic: String, type_name: String },
+    /// Refreshed publisher and subscriber endpoint lists for a topic.
+    /// Emitted on the graph-poll cadence (~500 ms); each event replaces
+    /// the previously known set for `topic`.
+    Endpoints {
+        topic: String,
+        publishers: Vec<EndpointInfo>,
+        subscribers: Vec<EndpointInfo>,
+    },
 }
 
 /// Backend trait — sources of `BackendEvent`s.

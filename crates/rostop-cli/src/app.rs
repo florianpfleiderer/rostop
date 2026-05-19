@@ -13,6 +13,7 @@ use crossterm::terminal::{
 use ratatui::backend::CrosstermBackend;
 use ratatui::widgets::TableState;
 use ratatui::Terminal;
+use rostop_core::endpoint::EndpointInfo;
 use rostop_core::message::{level_rows, DynamicValue};
 use rostop_core::registry::{SortKey, SortOrder, TopicRegistry};
 use rostop_core::sparkline::Sparkline;
@@ -65,6 +66,10 @@ pub struct App {
     /// inspector pane and fullscreen, so leaving fullscreen preserves the
     /// drill position.
     pub fullscreen: bool,
+    /// Latest known publisher / subscriber endpoint lists per topic.
+    /// Replaced wholesale on every `BackendEvent::Endpoints`. Cleared when
+    /// a topic disappears.
+    pub endpoints: HashMap<String, (Vec<EndpointInfo>, Vec<EndpointInfo>)>,
 }
 
 impl App {
@@ -102,6 +107,7 @@ impl App {
             notice: None,
             topic_table_state: TableState::default(),
             fullscreen: false,
+            endpoints: HashMap::new(),
         }
     }
 
@@ -201,12 +207,20 @@ impl App {
                     self.last_message.remove(&name);
                     self.hz_sparks.remove(&name);
                     self.bw_sparks.remove(&name);
+                    self.endpoints.remove(&name);
                 }
                 BackendEvent::Sample {
                     name, bytes, value, ..
                 } => {
                     self.registry.record(&name, elapsed_ns, bytes);
                     self.last_message.insert(name, value);
+                }
+                BackendEvent::Endpoints {
+                    topic,
+                    publishers,
+                    subscribers,
+                } => {
+                    self.endpoints.insert(topic, (publishers, subscribers));
                 }
                 BackendEvent::DecodeFailure { .. } => {
                     // Set the sticky hint once; suppress later failures so

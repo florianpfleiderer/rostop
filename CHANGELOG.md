@@ -23,6 +23,13 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   pane. `Esc` returns to the split-pane layout, preserving the drill path.
   Publisher / subscriber lists and per-topic QoS are not surfaced yet —
   follow-ups to issue #15.
+- **Publisher list with QoS in the fullscreen panel.** The fullscreen
+  single-topic view now lists each publisher with node name, namespace,
+  reliability + durability + history policy, liveliness setting, and a
+  short hex prefix of the endpoint GID. Subscribers render as
+  `(not available)` for now — r2r 0.9.5 only exposes the publisher side
+  of the graph, so the subscriber lookup will follow once upstream r2r
+  gains the symmetric API.
 
 ### Changed
 

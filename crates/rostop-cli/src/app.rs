@@ -13,6 +13,7 @@ use crossterm::terminal::{
 use ratatui::backend::CrosstermBackend;
 use ratatui::widgets::TableState;
 use ratatui::Terminal;
+use rostop_core::endpoint::EndpointSets;
 use rostop_core::message::{level_rows, DynamicValue};
 use rostop_core::registry::{SortKey, SortOrder, TopicRegistry};
 use rostop_core::sparkline::Sparkline;
@@ -66,6 +67,11 @@ pub struct App {
     /// name is "focus" because that's what it *means* — zooming in on a
     /// single topic.
     pub fullscreen: bool,
+    /// Latest known publisher / subscriber endpoint lists per topic.
+    /// `None` in either slot means the backend cannot determine that side
+    /// (rendered as "(not available)"). Replaced wholesale on every
+    /// `BackendEvent::Endpoints`; cleared when a topic disappears.
+    pub endpoints: HashMap<String, EndpointSets>,
 }
 
 impl App {
@@ -101,6 +107,7 @@ impl App {
             notice: None,
             topic_table_state: TableState::default(),
             fullscreen: false,
+            endpoints: HashMap::new(),
         }
     }
 
@@ -200,12 +207,20 @@ impl App {
                     self.last_message.remove(&name);
                     self.hz_sparks.remove(&name);
                     self.bw_sparks.remove(&name);
+                    self.endpoints.remove(&name);
                 }
                 BackendEvent::Sample {
                     name, bytes, value, ..
                 } => {
                     self.registry.record(&name, elapsed_ns, bytes);
                     self.last_message.insert(name, value);
+                }
+                BackendEvent::Endpoints {
+                    topic,
+                    publishers,
+                    subscribers,
+                } => {
+                    self.endpoints.insert(topic, (publishers, subscribers));
                 }
                 BackendEvent::DecodeFailure { .. } => {
                     // Set the sticky hint once; suppress later failures so

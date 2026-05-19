@@ -24,6 +24,10 @@ use futures::executor::LocalPool;
 use futures::task::LocalSpawnExt;
 use futures::StreamExt;
 
+use rostop_core::endpoint::{
+    normalise_duration, DurabilityKind, EndpointInfo, HistoryKind, LivelinessKind, QosSnapshot,
+    ReliabilityKind,
+};
 use rostop_core::message::DynamicValue;
 
 use crate::backend::{BackendEvent, RosBackend};
@@ -150,14 +154,46 @@ fn spin_loop(
                 let current: std::collections::HashSet<String> = nt.keys().cloned().collect();
 
                 for (name, types) in &nt {
-                    if known.contains_key(name) {
-                        continue;
-                    }
                     let Some(ty) = types.first() else { continue };
                     let pubs_info = node
                         .get_publishers_info_by_topic(name, false)
                         .unwrap_or_default();
                     let publishers = pubs_info.len() as u32;
+                    // Map inline: r2r 0.9.5 does not re-export TopicEndpointInfo
+                    // (it lives in a private `nodes` module) so we cannot name
+                    // it as a function parameter. The public fields are still
+                    // reachable through type inference here.
+                    //
+                    // GID is a fixed-size array whose bound r2r's bindgen
+                    // copies from the active rcl headers — 24 bytes on Humble,
+                    // 16 on Jazzy. We store the raw bytes verbatim so the size
+                    // doesn't matter to the renderer.
+                    let publisher_infos: Vec<EndpointInfo> = pubs_info
+                        .into_iter()
+                        .map(|info| EndpointInfo {
+                            node_name: info.node_name,
+                            node_namespace: info.node_namespace,
+                            topic_type: info.topic_type,
+                            endpoint_gid: info.endpoint_gid.to_vec(),
+                            qos: qos_from_r2r(info.qos_profile),
+                        })
+                        .collect();
+
+                    // Subscriber endpoint info is not reachable: r2r::Node
+                    // exposes node_handle as pub(crate) only, and there is no
+                    // public accessor for the *const rcl_node_t we'd need to
+                    // call rcl_get_subscriptions_info_by_topic ourselves. We
+                    // emit None so the UI shows "(not available)" rather than
+                    // a misleading empty list. See follow-up issue.
+                    let _ = event_tx.send(BackendEvent::Endpoints {
+                        topic: name.clone(),
+                        publishers: Some(publisher_infos),
+                        subscribers: None,
+                    });
+
+                    if known.contains_key(name) {
+                        continue;
+                    }
                     let _ = event_tx.send(BackendEvent::Topic {
                         name: name.clone(),
                         type_name: ty.clone(),
@@ -305,6 +341,42 @@ fn is_json_leaf_primitive(v: &serde_json::Value) -> bool {
             | serde_json::Value::Number(_)
             | serde_json::Value::String(_)
     )
+}
+
+fn qos_from_r2r(q: r2r::QosProfile) -> QosSnapshot {
+    use r2r::qos::{DurabilityPolicy, HistoryPolicy, LivelinessPolicy, ReliabilityPolicy};
+
+    let reliability = match q.reliability {
+        ReliabilityPolicy::Reliable => ReliabilityKind::Reliable,
+        ReliabilityPolicy::BestEffort => ReliabilityKind::BestEffort,
+        _ => ReliabilityKind::Unknown,
+    };
+    let durability = match q.durability {
+        DurabilityPolicy::TransientLocal => DurabilityKind::TransientLocal,
+        DurabilityPolicy::Volatile => DurabilityKind::Volatile,
+        _ => DurabilityKind::Unknown,
+    };
+    let history = match q.history {
+        HistoryPolicy::KeepLast => HistoryKind::KeepLast,
+        HistoryPolicy::KeepAll => HistoryKind::KeepAll,
+        _ => HistoryKind::Unknown,
+    };
+    let liveliness = match q.liveliness {
+        LivelinessPolicy::Automatic => LivelinessKind::Automatic,
+        LivelinessPolicy::ManualByTopic => LivelinessKind::ManualByTopic,
+        _ => LivelinessKind::Unknown,
+    };
+
+    QosSnapshot {
+        reliability,
+        durability,
+        history,
+        depth: q.depth,
+        deadline: normalise_duration(q.deadline),
+        lifespan: normalise_duration(q.lifespan),
+        liveliness,
+        liveliness_lease: normalise_duration(q.liveliness_lease_duration),
+    }
 }
 
 #[cfg(test)]

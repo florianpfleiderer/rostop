@@ -168,27 +168,33 @@ fn spin_loop(
                     // copies from the active rcl headers — 24 bytes on Humble,
                     // 16 on Jazzy. We store the raw bytes verbatim so the size
                     // doesn't matter to the renderer.
-                    let publisher_infos: Vec<EndpointInfo> = pubs_info
-                        .into_iter()
-                        .map(|info| EndpointInfo {
+                    // r2r 0.9.5 keeps the `nodes` module private so
+                    // TopicEndpointInfo isn't nameable from outside the crate.
+                    // We can still read its public fields through type
+                    // inference, so the mapping stays as an inline closure
+                    // applied to both the publisher and subscriber lists.
+                    let map_endpoint = |info: r2r::TopicEndpointInfo| -> EndpointInfo {
+                        EndpointInfo {
                             node_name: info.node_name,
                             node_namespace: info.node_namespace,
                             topic_type: info.topic_type,
                             endpoint_gid: info.endpoint_gid.to_vec(),
                             qos: qos_from_r2r(info.qos_profile),
-                        })
-                        .collect();
+                        }
+                    };
+                    let publisher_infos: Vec<EndpointInfo> =
+                        pubs_info.into_iter().map(map_endpoint).collect();
 
-                    // Subscriber endpoint info is not reachable: r2r::Node
-                    // exposes node_handle as pub(crate) only, and there is no
-                    // public accessor for the *const rcl_node_t we'd need to
-                    // call rcl_get_subscriptions_info_by_topic ourselves. We
-                    // emit None so the UI shows "(not available)" rather than
-                    // a misleading empty list. See follow-up issue.
+                    let subs_info = node
+                        .get_subscriptions_info_by_topic(name, false)
+                        .unwrap_or_default();
+                    let subscriber_infos: Vec<EndpointInfo> =
+                        subs_info.into_iter().map(map_endpoint).collect();
+
                     let _ = event_tx.send(BackendEvent::Endpoints {
                         topic: name.clone(),
                         publishers: Some(publisher_infos),
-                        subscribers: None,
+                        subscribers: Some(subscriber_infos),
                     });
 
                     if known.contains_key(name) {

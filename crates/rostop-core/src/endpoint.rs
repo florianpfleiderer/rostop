@@ -12,19 +12,19 @@ use std::time::Duration;
 /// to distinguish from a confirmed empty list.
 pub type EndpointSets = (Option<Vec<EndpointInfo>>, Option<Vec<EndpointInfo>>);
 
-/// Fixed RMW GID storage size. RCL hard-codes this as 24 across every RMW
-/// shipping today (FastDDS, CycloneDDS, ConnextDDS). The live backend
-/// debug-asserts that the bound matches `RMW_GID_STORAGE_SIZE` when copying
-/// out of the FFI struct.
-pub const GID_SIZE: usize = 24;
-
 /// One ROS 2 graph endpoint (publisher or subscriber) attached to a topic.
+///
+/// `endpoint_gid` is stored as a `Vec<u8>` rather than a fixed array because
+/// `RMW_GID_STORAGE_SIZE` is set at compile time by r2r's bindgen against the
+/// active rcl headers and varies across distros: Humble reports 24 bytes,
+/// Jazzy reports a smaller buffer. The TUI only displays a short hex prefix,
+/// so the actual length doesn't matter beyond "non-empty".
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct EndpointInfo {
     pub node_name: String,
     pub node_namespace: String,
     pub topic_type: String,
-    pub endpoint_gid: [u8; GID_SIZE],
+    pub endpoint_gid: Vec<u8>,
     pub qos: QosSnapshot,
 }
 
@@ -123,11 +123,13 @@ pub fn normalise_duration(d: Duration) -> Option<Duration> {
     }
 }
 
-/// Hex-render the first 8 bytes of an endpoint GID — enough to disambiguate
-/// in practice without making rows unreadable.
-pub fn gid_hex_short(gid: &[u8; GID_SIZE]) -> String {
-    let mut out = String::with_capacity(16);
-    for byte in &gid[..8] {
+/// Hex-render up to the first 8 bytes of an endpoint GID — enough to
+/// disambiguate in practice without making rows unreadable. Tolerates GIDs
+/// shorter than 8 bytes (older RMW configs / synthesised values).
+pub fn gid_hex_short(gid: &[u8]) -> String {
+    let take = gid.len().min(8);
+    let mut out = String::with_capacity(take * 2);
+    for byte in &gid[..take] {
         use std::fmt::Write as _;
         let _ = write!(out, "{byte:02x}");
     }

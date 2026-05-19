@@ -6,7 +6,6 @@ use std::time::{Duration, Instant};
 
 use rostop_core::endpoint::{
     DurabilityKind, EndpointInfo, HistoryKind, LivelinessKind, QosSnapshot, ReliabilityKind,
-    GID_SIZE,
 };
 use rostop_core::message::DynamicValue;
 
@@ -251,7 +250,7 @@ fn fake_endpoints(node_prefix: &str, topic_type: &str, count: usize) -> Vec<Endp
             node_namespace: "/".into(),
             topic_type: topic_type.into(),
             endpoint_gid: {
-                let mut g = [0u8; GID_SIZE];
+                let mut g = vec![0u8; 16];
                 g[0] = i as u8;
                 g
             },

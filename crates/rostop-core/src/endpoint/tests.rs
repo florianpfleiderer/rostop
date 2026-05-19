@@ -16,15 +16,22 @@ fn duration_sentinels_normalise_to_none() {
 
 #[test]
 fn gid_hex_short_renders_first_eight_bytes() {
-    let mut gid = [0u8; GID_SIZE];
+    let mut gid = vec![0u8; 24];
     gid[..8].copy_from_slice(&[0x01, 0x23, 0x45, 0x67, 0x89, 0xab, 0xcd, 0xef]);
     assert_eq!(gid_hex_short(&gid), "0123456789abcdef");
 }
 
 #[test]
-fn gid_hex_short_pads_short_prefixes() {
-    let gid = [0u8; GID_SIZE];
+fn gid_hex_short_handles_zero_filled_gid() {
+    let gid = vec![0u8; 24];
     assert_eq!(gid_hex_short(&gid), "0000000000000000");
+}
+
+#[test]
+fn gid_hex_short_truncates_to_available_bytes_when_short() {
+    // RMW configs that emit fewer than 8 bytes still render — don't panic.
+    let gid = vec![0xde, 0xad, 0xbe, 0xef];
+    assert_eq!(gid_hex_short(&gid), "deadbeef");
 }
 
 #[test]
@@ -82,7 +89,7 @@ fn sample_endpoint(node: &str, ns: &str) -> EndpointInfo {
         node_name: node.into(),
         node_namespace: ns.into(),
         topic_type: "std_msgs/msg/String".into(),
-        endpoint_gid: [0u8; GID_SIZE],
+        endpoint_gid: vec![0u8; 16],
         qos: QosSnapshot {
             reliability: ReliabilityKind::Reliable,
             durability: DurabilityKind::Volatile,

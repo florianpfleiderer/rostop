@@ -163,15 +163,18 @@ fn spin_loop(
                     // (it lives in a private `nodes` module) so we cannot name
                     // it as a function parameter. The public fields are still
                     // reachable through type inference here.
+                    //
+                    // GID is a fixed-size array whose bound r2r's bindgen
+                    // copies from the active rcl headers — 24 bytes on Humble,
+                    // 16 on Jazzy. We store the raw bytes verbatim so the size
+                    // doesn't matter to the renderer.
                     let publisher_infos: Vec<EndpointInfo> = pubs_info
                         .into_iter()
                         .map(|info| EndpointInfo {
                             node_name: info.node_name,
                             node_namespace: info.node_namespace,
                             topic_type: info.topic_type,
-                            endpoint_gid: info.endpoint_gid.as_slice().try_into().expect(
-                                "RMW_GID_STORAGE_SIZE changed; rostop_core::endpoint::GID_SIZE needs to follow",
-                            ),
+                            endpoint_gid: info.endpoint_gid.to_vec(),
                             qos: qos_from_r2r(info.qos_profile),
                         })
                         .collect();

@@ -835,8 +835,7 @@ checksum = "f8dcc9c7d52a811697d2151c701e0d08956f92b0e24136cf4cf27b57a6a0d9bf"
 [[package]]
 name = "r2r"
 version = "0.9.5"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b36b61a6252e8e7a24919b9877dacf1dc9f0ac4c2d0eba91c68b35c1b2283ed2"
+source = "git+https://github.com/florianpfleiderer/r2r.git?rev=d4de39d5ea615e58b27a2a323a1f33496ac3e25b#d4de39d5ea615e58b27a2a323a1f33496ac3e25b"
 dependencies = [
  "force-send-sync",
  "futures",
@@ -863,8 +862,7 @@ dependencies = [
 [[package]]
 name = "r2r_actions"
 version = "0.9.5"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5ca8488195951aaadef421b470c823cd095848bebf2004ff96ef5d351067eac1"
+source = "git+https://github.com/florianpfleiderer/r2r.git?rev=d4de39d5ea615e58b27a2a323a1f33496ac3e25b#d4de39d5ea615e58b27a2a323a1f33496ac3e25b"
 dependencies = [
  "bindgen",
  "r2r_common",
@@ -875,8 +873,7 @@ dependencies = [
 [[package]]
 name = "r2r_common"
 version = "0.9.5"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9838c2f88c9fd088f188eadbf9459371b1e576affd7b2df04c45cd1e44b79b99"
+source = "git+https://github.com/florianpfleiderer/r2r.git?rev=d4de39d5ea615e58b27a2a323a1f33496ac3e25b#d4de39d5ea615e58b27a2a323a1f33496ac3e25b"
 dependencies = [
  "bindgen",
  "os_str_bytes",
@@ -887,8 +884,7 @@ dependencies = [
 [[package]]
 name = "r2r_macros"
 version = "0.9.5"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "be0cda9778c21f78d2d593df41298c14b6530061dc70d2d31eb831f7fec8d648"
+source = "git+https://github.com/florianpfleiderer/r2r.git?rev=d4de39d5ea615e58b27a2a323a1f33496ac3e25b#d4de39d5ea615e58b27a2a323a1f33496ac3e25b"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -898,8 +894,7 @@ dependencies = [
 [[package]]
 name = "r2r_msg_gen"
 version = "0.9.5"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "03d5e77385a6b959014c14c45a444e1fbff99afad70912e120c21c30e7a65488"
+source = "git+https://github.com/florianpfleiderer/r2r.git?rev=d4de39d5ea615e58b27a2a323a1f33496ac3e25b#d4de39d5ea615e58b27a2a323a1f33496ac3e25b"
 dependencies = [
  "bindgen",
  "force-send-sync",
@@ -916,8 +911,7 @@ dependencies = [
 [[package]]
 name = "r2r_rcl"
 version = "0.9.5"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9e5c208b2fbe64a00a42a70391f708298b6765769d39987286f4b7c82539561e"
+source = "git+https://github.com/florianpfleiderer/r2r.git?rev=d4de39d5ea615e58b27a2a323a1f33496ac3e25b#d4de39d5ea615e58b27a2a323a1f33496ac3e25b"
 dependencies = [
  "bindgen",
  "paste",

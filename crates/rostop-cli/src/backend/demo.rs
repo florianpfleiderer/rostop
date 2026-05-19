@@ -64,8 +64,16 @@ impl RosBackend for DemoBackend {
                 });
                 out.push(BackendEvent::Endpoints {
                     topic: t.name.into(),
-                    publishers: fake_endpoints("/demo_pub", t.type_name, t.publishers as usize),
-                    subscribers: fake_endpoints("/demo_sub", t.type_name, t.subscribers as usize),
+                    publishers: Some(fake_endpoints(
+                        "/demo_pub",
+                        t.type_name,
+                        t.publishers as usize,
+                    )),
+                    subscribers: Some(fake_endpoints(
+                        "/demo_sub",
+                        t.type_name,
+                        t.subscribers as usize,
+                    )),
                 });
             }
             self.announced = true;

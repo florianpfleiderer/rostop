@@ -6,6 +6,12 @@
 
 use std::time::Duration;
 
+/// Per-topic endpoint snapshot: publishers and subscribers, each optionally
+/// `None` if the backend cannot determine that side (e.g. r2r 0.9.5 does
+/// not expose subscriber info). The UI renders `None` as "(not available)"
+/// to distinguish from a confirmed empty list.
+pub type EndpointSets = (Option<Vec<EndpointInfo>>, Option<Vec<EndpointInfo>>);
+
 /// Fixed RMW GID storage size. RCL hard-codes this as 24 across every RMW
 /// shipping today (FastDDS, CycloneDDS, ConnextDDS). The live backend
 /// debug-asserts that the bound matches `RMW_GID_STORAGE_SIZE` when copying

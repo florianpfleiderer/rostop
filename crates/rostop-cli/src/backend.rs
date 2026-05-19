@@ -41,11 +41,14 @@ pub enum BackendEvent {
     DecodeFailure { topic: String, type_name: String },
     /// Refreshed publisher and subscriber endpoint lists for a topic.
     /// Emitted on the graph-poll cadence (~500 ms); each event replaces
-    /// the previously known set for `topic`.
+    /// the previously known set for `topic`. `None` means the backend
+    /// cannot fetch this list (e.g. r2r 0.9.5 has no public accessor for
+    /// the subscriber side); the UI renders that as "(not available)" so
+    /// the user knows it's a known limitation, not just an empty graph.
     Endpoints {
         topic: String,
-        publishers: Vec<EndpointInfo>,
-        subscribers: Vec<EndpointInfo>,
+        publishers: Option<Vec<EndpointInfo>>,
+        subscribers: Option<Vec<EndpointInfo>>,
     },
 }
 

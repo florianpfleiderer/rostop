@@ -13,7 +13,7 @@ use crossterm::terminal::{
 use ratatui::backend::CrosstermBackend;
 use ratatui::widgets::TableState;
 use ratatui::Terminal;
-use rostop_core::endpoint::EndpointInfo;
+use rostop_core::endpoint::EndpointSets;
 use rostop_core::message::{level_rows, DynamicValue};
 use rostop_core::registry::{SortKey, SortOrder, TopicRegistry};
 use rostop_core::sparkline::Sparkline;
@@ -67,9 +67,10 @@ pub struct App {
     /// drill position.
     pub fullscreen: bool,
     /// Latest known publisher / subscriber endpoint lists per topic.
-    /// Replaced wholesale on every `BackendEvent::Endpoints`. Cleared when
-    /// a topic disappears.
-    pub endpoints: HashMap<String, (Vec<EndpointInfo>, Vec<EndpointInfo>)>,
+    /// `None` in either slot means the backend cannot determine that side
+    /// (rendered as "(not available)"). Replaced wholesale on every
+    /// `BackendEvent::Endpoints`; cleared when a topic disappears.
+    pub endpoints: HashMap<String, EndpointSets>,
 }
 
 impl App {

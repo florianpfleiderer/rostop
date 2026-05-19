@@ -5,7 +5,7 @@ use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Cell, Paragraph, Row, Table};
 use ratatui::Frame;
-use rostop_core::endpoint::{gid_hex_short, sort_endpoints, EndpointInfo};
+use rostop_core::endpoint::{gid_hex_short, sort_endpoints, EndpointInfo, EndpointSets};
 use rostop_core::message::{level_rows, path_segments};
 
 use crate::app::{App, Focus};
@@ -109,59 +109,73 @@ fn render_fullscreen_topic(f: &mut Frame, area: Rect, app: &App, rows: &[TopicTa
 /// A pathological topic with many endpoints will show a "+N more" footer.
 const MAX_ENDPOINT_ROWS: usize = 6;
 
-fn endpoint_section_height(
-    endpoints: Option<&(Vec<EndpointInfo>, Vec<EndpointInfo>)>,
-) -> u16 {
-    let (pubs, subs) = match endpoints {
-        Some((p, s)) => (p.len(), s.len()),
-        None => (0, 0),
+fn endpoint_section_height(endpoints: Option<&EndpointSets>) -> u16 {
+    let (pubs, subs): (Option<usize>, Option<usize>) = match endpoints {
+        Some((p, s)) => (p.as_ref().map(Vec::len), s.as_ref().map(Vec::len)),
+        None => (None, None),
     };
     let mut h = 0usize;
-    for n in [pubs, subs] {
+    for slot in [pubs, subs] {
         h += 1; // section heading
-        if n == 0 {
-            h += 1; // "(none)" placeholder
-        } else {
-            h += n.min(MAX_ENDPOINT_ROWS) * 2;
-            if n > MAX_ENDPOINT_ROWS {
-                h += 1; // "+N more" footer
+        match slot {
+            None => h += 1,    // "(not available)" placeholder
+            Some(0) => h += 1, // "(none)" placeholder
+            Some(n) => {
+                h += n.min(MAX_ENDPOINT_ROWS) * 2;
+                if n > MAX_ENDPOINT_ROWS {
+                    h += 1; // "+N more" footer
+                }
             }
         }
     }
     h as u16
 }
 
-fn render_fullscreen_endpoints(
-    f: &mut Frame,
-    area: Rect,
-    endpoints: Option<&(Vec<EndpointInfo>, Vec<EndpointInfo>)>,
-) {
+fn render_fullscreen_endpoints(f: &mut Frame, area: Rect, endpoints: Option<&EndpointSets>) {
     let mut lines: Vec<Line> = Vec::new();
 
-    let (pubs, subs): (Vec<EndpointInfo>, Vec<EndpointInfo>) = match endpoints {
+    let (pubs, subs): (Option<Vec<EndpointInfo>>, Option<Vec<EndpointInfo>>) = match endpoints {
         Some((p, s)) => {
             let mut p = p.clone();
             let mut s = s.clone();
-            sort_endpoints(&mut p);
-            sort_endpoints(&mut s);
+            if let Some(v) = &mut p {
+                sort_endpoints(v);
+            }
+            if let Some(v) = &mut s {
+                sort_endpoints(v);
+            }
             (p, s)
         }
-        None => (Vec::new(), Vec::new()),
+        None => (None, None),
     };
 
-    push_endpoint_section(&mut lines, "PUBLISHERS", &pubs);
-    push_endpoint_section(&mut lines, "SUBSCRIBERS", &subs);
+    push_endpoint_section(&mut lines, "PUBLISHERS", pubs.as_deref());
+    push_endpoint_section(&mut lines, "SUBSCRIBERS", subs.as_deref());
 
     f.render_widget(Paragraph::new(lines), area);
 }
 
-fn push_endpoint_section(lines: &mut Vec<Line<'_>>, title: &'static str, items: &[EndpointInfo]) {
+fn push_endpoint_section(
+    lines: &mut Vec<Line<'_>>,
+    title: &'static str,
+    items: Option<&[EndpointInfo]>,
+) {
     lines.push(Line::from(Span::styled(
         title,
         Style::default()
             .fg(Color::Cyan)
             .add_modifier(Modifier::BOLD),
     )));
+    let items = match items {
+        None => {
+            lines.push(Line::from(Span::styled(
+                "  (not available)",
+                Style::default().fg(Color::DarkGray),
+            )));
+            return;
+        }
+        Some(items) => items,
+    };
     if items.is_empty() {
         lines.push(Line::from(Span::styled(
             "  (none)",

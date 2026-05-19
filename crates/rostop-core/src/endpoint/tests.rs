@@ -8,7 +8,10 @@ fn duration_sentinels_normalise_to_none() {
     // to None so the renderer doesn't have to know DDS magic numbers.
     assert_eq!(normalise_duration(Duration::MAX), None);
     assert_eq!(normalise_duration(Duration::ZERO), None);
-    assert_eq!(normalise_duration(Duration::from_millis(100)), Some(Duration::from_millis(100)));
+    assert_eq!(
+        normalise_duration(Duration::from_millis(100)),
+        Some(Duration::from_millis(100))
+    );
 }
 
 #[test]

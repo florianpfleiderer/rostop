@@ -5,6 +5,7 @@ use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Cell, Paragraph, Row, Table};
 use ratatui::Frame;
+use rostop_core::endpoint::{gid_hex_short, sort_endpoints, EndpointInfo};
 use rostop_core::message::{level_rows, path_segments};
 
 use crate::app::{App, Focus};
@@ -85,14 +86,130 @@ fn render_fullscreen_topic(f: &mut Frame, area: Rect, app: &App, rows: &[TopicTa
     let inner = outer.inner(area);
     f.render_widget(outer, area);
 
-    // Top metrics strip (5 lines) above the message tree fills the rest.
+    // Metrics strip, then publisher/subscriber lists, then the message tree.
+    // Endpoint section height is bounded so a pathological topic with dozens
+    // of endpoints can't squeeze the message tree out of view.
+    let endpoints = app.endpoints.get(&row.name);
+    let endpoints_height = endpoint_section_height(endpoints);
     let layout = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([Constraint::Length(6), Constraint::Min(1)])
+        .constraints([
+            Constraint::Length(6),
+            Constraint::Length(endpoints_height),
+            Constraint::Min(1),
+        ])
         .split(inner);
 
     render_fullscreen_metrics(f, layout[0], app, row);
-    render_fullscreen_message_tree(f, layout[1], app, &row.name);
+    render_fullscreen_endpoints(f, layout[1], endpoints);
+    render_fullscreen_message_tree(f, layout[2], app, &row.name);
+}
+
+/// Per-section row cap. Each endpoint takes 2 lines (header + qos detail).
+/// A pathological topic with many endpoints will show a "+N more" footer.
+const MAX_ENDPOINT_ROWS: usize = 6;
+
+fn endpoint_section_height(
+    endpoints: Option<&(Vec<EndpointInfo>, Vec<EndpointInfo>)>,
+) -> u16 {
+    let (pubs, subs) = match endpoints {
+        Some((p, s)) => (p.len(), s.len()),
+        None => (0, 0),
+    };
+    let mut h = 0usize;
+    for n in [pubs, subs] {
+        h += 1; // section heading
+        if n == 0 {
+            h += 1; // "(none)" placeholder
+        } else {
+            h += n.min(MAX_ENDPOINT_ROWS) * 2;
+            if n > MAX_ENDPOINT_ROWS {
+                h += 1; // "+N more" footer
+            }
+        }
+    }
+    h as u16
+}
+
+fn render_fullscreen_endpoints(
+    f: &mut Frame,
+    area: Rect,
+    endpoints: Option<&(Vec<EndpointInfo>, Vec<EndpointInfo>)>,
+) {
+    let mut lines: Vec<Line> = Vec::new();
+
+    let (pubs, subs): (Vec<EndpointInfo>, Vec<EndpointInfo>) = match endpoints {
+        Some((p, s)) => {
+            let mut p = p.clone();
+            let mut s = s.clone();
+            sort_endpoints(&mut p);
+            sort_endpoints(&mut s);
+            (p, s)
+        }
+        None => (Vec::new(), Vec::new()),
+    };
+
+    push_endpoint_section(&mut lines, "PUBLISHERS", &pubs);
+    push_endpoint_section(&mut lines, "SUBSCRIBERS", &subs);
+
+    f.render_widget(Paragraph::new(lines), area);
+}
+
+fn push_endpoint_section(lines: &mut Vec<Line<'_>>, title: &'static str, items: &[EndpointInfo]) {
+    lines.push(Line::from(Span::styled(
+        title,
+        Style::default()
+            .fg(Color::Cyan)
+            .add_modifier(Modifier::BOLD),
+    )));
+    if items.is_empty() {
+        lines.push(Line::from(Span::styled(
+            "  (none)",
+            Style::default().fg(Color::DarkGray),
+        )));
+        return;
+    }
+    let yellow = Style::default().fg(Color::Yellow);
+    let dim = Style::default().fg(Color::DarkGray);
+    for ep in items.iter().take(MAX_ENDPOINT_ROWS) {
+        let ns = if ep.node_namespace == "/" {
+            String::new()
+        } else {
+            format!(" ({})", ep.node_namespace)
+        };
+        lines.push(Line::from(vec![
+            Span::raw("  "),
+            Span::styled(ep.node_name.clone(), yellow),
+            Span::styled(ns, dim),
+            Span::raw("  "),
+            Span::styled(
+                format!(
+                    "{}/{}  {}",
+                    ep.qos.reliability.as_str(),
+                    ep.qos.durability.as_str(),
+                    ep.qos.history_display()
+                ),
+                Style::default().fg(Color::Green),
+            ),
+        ]));
+        lines.push(Line::from(vec![
+            Span::raw("    "),
+            Span::styled(
+                format!(
+                    "liveliness {}   gid {}",
+                    ep.qos.liveliness.as_str(),
+                    gid_hex_short(&ep.endpoint_gid),
+                ),
+                dim,
+            ),
+        ]));
+    }
+    if items.len() > MAX_ENDPOINT_ROWS {
+        lines.push(Line::from(Span::styled(
+            format!("  +{} more", items.len() - MAX_ENDPOINT_ROWS),
+            dim,
+        )));
+    }
 }
 
 fn render_fullscreen_metrics(f: &mut Frame, area: Rect, app: &App, row: &TopicTableRow) {

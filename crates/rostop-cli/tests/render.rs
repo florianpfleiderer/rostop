@@ -160,6 +160,46 @@ fn fullscreen_mode_swaps_layout_to_a_single_topic_panel() {
 }
 
 #[test]
+fn fullscreen_panel_lists_publishers_and_subscribers() {
+    let mut handle = AppHandle::demo();
+    handle.tick(Duration::from_millis(250));
+    handle.app.fullscreen = true;
+    handle.app.selected = 0;
+
+    // Use enough rows that the endpoints + message tree both fit.
+    let backend = TestBackend::new(160, 40);
+    let mut terminal = Terminal::new(backend).unwrap();
+    render_once(&mut terminal, &mut handle);
+
+    let buf = terminal.backend().buffer().clone();
+    let dump = (0..buf.area.height)
+        .map(|y| {
+            (0..buf.area.width)
+                .map(|x| buf[(x, y)].symbol())
+                .collect::<String>()
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    assert!(
+        dump.contains("PUBLISHERS"),
+        "expected PUBLISHERS section in fullscreen panel:\n{dump}"
+    );
+    assert!(
+        dump.contains("SUBSCRIBERS"),
+        "expected SUBSCRIBERS section in fullscreen panel:\n{dump}"
+    );
+    assert!(
+        dump.contains("/demo_pub"),
+        "expected at least one demo publisher node name to render:\n{dump}"
+    );
+    assert!(
+        dump.contains("Reliable/Volatile"),
+        "expected QoS summary on endpoint row:\n{dump}"
+    );
+}
+
+#[test]
 fn rendering_with_no_data_does_not_panic() {
     let mut app = AppHandle::demo();
     // Don't tick the backend — registry is empty.

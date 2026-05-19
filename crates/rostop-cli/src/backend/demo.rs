@@ -4,6 +4,10 @@
 
 use std::time::{Duration, Instant};
 
+use rostop_core::endpoint::{
+    DurabilityKind, EndpointInfo, HistoryKind, LivelinessKind, QosSnapshot, ReliabilityKind,
+    GID_SIZE,
+};
 use rostop_core::message::DynamicValue;
 
 use super::{BackendEvent, RosBackend};
@@ -57,6 +61,11 @@ impl RosBackend for DemoBackend {
                     type_name: t.type_name.into(),
                     publishers: t.publishers,
                     subscribers: t.subscribers,
+                });
+                out.push(BackendEvent::Endpoints {
+                    topic: t.name.into(),
+                    publishers: fake_endpoints("/demo_pub", t.type_name, t.publishers as usize),
+                    subscribers: fake_endpoints("/demo_sub", t.type_name, t.subscribers as usize),
                 });
             }
             self.announced = true;
@@ -221,6 +230,35 @@ fn build_value(t: &DemoTopic) -> DynamicValue {
         ]),
         _ => DynamicValue::Struct(vec![("seq".into(), DynamicValue::U64(t.seq))]),
     }
+}
+
+fn fake_endpoints(node_prefix: &str, topic_type: &str, count: usize) -> Vec<EndpointInfo> {
+    (0..count)
+        .map(|i| EndpointInfo {
+            node_name: if count > 1 {
+                format!("{node_prefix}_{i}")
+            } else {
+                node_prefix.into()
+            },
+            node_namespace: "/".into(),
+            topic_type: topic_type.into(),
+            endpoint_gid: {
+                let mut g = [0u8; GID_SIZE];
+                g[0] = i as u8;
+                g
+            },
+            qos: QosSnapshot {
+                reliability: ReliabilityKind::Reliable,
+                durability: DurabilityKind::Volatile,
+                history: HistoryKind::KeepLast,
+                depth: 10,
+                deadline: None,
+                lifespan: None,
+                liveliness: LivelinessKind::Automatic,
+                liveliness_lease: None,
+            },
+        })
+        .collect()
 }
 
 fn default_topics() -> Vec<DemoTopic> {

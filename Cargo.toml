@@ -25,3 +25,9 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 lto = "thin"
 codegen-units = 1
 strip = true
+
+# Pin r2r to a fork that adds Node::get_subscriptions_info_by_topic and
+# re-exports TopicEndpointInfo. Required until the upstream PR against
+# sequenceplanner/r2r merges and ships in a release. Tracked by #29.
+[patch.crates-io]
+r2r = { git = "https://github.com/florianpfleiderer/r2r.git", rev = "d4de39d5ea615e58b27a2a323a1f33496ac3e25b" }

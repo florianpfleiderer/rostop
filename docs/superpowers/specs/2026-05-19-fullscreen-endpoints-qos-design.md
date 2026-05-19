@@ -17,7 +17,13 @@ This is the second half of issue #15 (the first half — the fullscreen layout �
 
 ## Key finding from exploration
 
-**`r2r` 0.9.5 only wraps `rcl_get_publishers_info_by_topic`, not the symmetric subscription variant.** The issue body in #24 says r2r exposes both — it does not. The C symbol `rcl_get_subscriptions_info_by_topic` IS present in `r2r_rcl::bindings`, so we can call it ourselves with a small unsafe shim that mirrors r2r's own publisher-info impl. We ship that shim in `backend/live.rs` and keep the issue scope intact (publishers AND subscribers). Upstreaming a PR to r2r is a separate, optional follow-up.
+**`r2r` 0.9.5 only wraps `rcl_get_publishers_info_by_topic`, not the symmetric subscription variant.** The issue body in #24 says r2r exposes both — it does not.
+
+A first plan was to write a small unsafe shim calling `rcl_get_subscriptions_info_by_topic` directly, since the C symbol IS in `r2r_rcl::bindings`. That requires the `*const rcl_node_t` raw pointer, which r2r exposes as `Node::node_handle` — but the field is **`pub(crate)`**, not public. There is no public accessor either. So we cannot call the FFI ourselves from outside the r2r crate.
+
+**Revised scope for this PR**: publishers + QoS only. The subscribers section is still rendered, but with a clear "(not available — see #X)" placeholder. A follow-up issue tracks either upstreaming `get_subscriptions_info_by_topic` to r2r or vendoring a small fork.
+
+This is still a meaningful slice of the original issue — the publisher list is the more useful half (you're usually trying to find *who is publishing this topic*; subscribers are easier to enumerate by inspection).
 
 ## Architecture
 
@@ -82,22 +88,22 @@ Endpoints {
 
 **Channel volume**: one event per known topic per poll tick. With ~50 topics that's 100 events / s — well within mpsc capacity. Each event allocates a Vec<EndpointInfo> with usually 1–3 entries. Acceptable.
 
-### 3. Backend shim — `live.rs` only
+### 3. Backend mapping — `live.rs` only
 
-Two functions in `backend/live.rs`:
+One function in `backend/live.rs`:
 
 ```rust
 fn get_publishers_endpoint_info(node: &Node, topic: &str)
     -> Vec<EndpointInfo>;
-fn get_subscriptions_endpoint_info(node: &Node, topic: &str)
-    -> Vec<EndpointInfo>;
 ```
 
-The first wraps `node.get_publishers_info_by_topic(name, false)` and maps `r2r::TopicEndpointInfo` → `EndpointInfo`. The second mirrors r2r's own publisher-info impl, calling `rcl_get_subscriptions_info_by_topic` directly through `r2r_rcl::bindings`. Both convert the `[u8; RMW_GID_STORAGE_SIZE]` GID assuming size 24 (debug-assert otherwise).
+Wraps `node.get_publishers_info_by_topic(name, false)` and maps `r2r::TopicEndpointInfo` → `EndpointInfo`. Subscribers can't be fetched without access to `Node::node_handle` (see "Key finding"); we emit an empty subscriber list in the live backend and the renderer shows "(not available)" rather than "(none)" so the user knows there's a known limitation, not just an empty graph.
 
-QoS mapping converts `r2r::QosProfile` enums to `QosSnapshot` enums, and uses sentinel detection to fold "infinite" / "system default" `Duration` values to `None`.
+QoS mapping converts `r2r::qos::{HistoryPolicy, ReliabilityPolicy, DurabilityPolicy, LivelinessPolicy}` to the corresponding core enums. r2r's `BestAvailable` variant is feature-gated on Iron / Jazzy / Rolling; we fold it to `Unknown` in the mapping so Humble builds keep compiling. `SystemDefault` also folds to `Unknown` since we have no way to know what the system default actually resolved to.
 
-The spin loop is extended: after the existing publisher count probe, it computes both endpoint lists and emits `BackendEvent::Endpoints` per topic.
+Sentinel detection folds "infinite" / `Duration::ZERO` `Duration` fields to `None`.
+
+The spin loop is extended: after the existing publisher count probe, it computes the publisher list and emits `BackendEvent::Endpoints` per topic.
 
 ### 4. App state — store latest endpoints per topic
 
@@ -178,9 +184,8 @@ Atomic commits, each green:
 1. `feat(core):` add `EndpointInfo`, `QosSnapshot`, enums, sentinel logic, unit tests.
 2. `feat(cli):` add `BackendEvent::Endpoints`, handle in `App::ingest`, store in `endpoints` map.
 3. `feat(cli):` demo backend emits fake endpoints; integration test for fullscreen rendering.
-4. `feat(cli):` live backend publisher-side wrapping via `r2r::TopicEndpointInfo`.
-5. `feat(cli):` live backend subscriber-side via `rcl_get_subscriptions_info_by_topic` shim.
-6. `docs:` CHANGELOG `[Unreleased]` entry.
+4. `feat(cli):` live backend publisher-side wrapping via `r2r::TopicEndpointInfo`; subscribers surface a "(not available)" placeholder.
+5. `docs:` CHANGELOG `[Unreleased]` entry; open follow-up issue for subscriber support.
 
 ## Open risks / things to watch
 

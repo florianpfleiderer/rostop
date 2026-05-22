@@ -131,7 +131,17 @@ fn spin_loop(
 
     let mut pool = LocalPool::new();
     let spawner = pool.spawner();
-    let mut known: HashMap<String, String> = HashMap::new();
+    // Per-topic state. `announced` is set after we emit the Topic event;
+    // `subscribed` is set after subscribe_raw succeeds with a QoS derived
+    // from the topic's publishers. They are tracked separately so a topic
+    // discovered before any publisher exists (e.g. the local node creating
+    // it ahead of any peers) still appears in the UI, and the subscription
+    // is created later once we can pick a compatible QoS.
+    struct TopicState {
+        announced: bool,
+        subscribed: bool,
+    }
+    let mut known: HashMap<String, TopicState> = HashMap::new();
     let mut last_poll = Instant::now()
         .checked_sub(GRAPH_POLL_INTERVAL)
         .unwrap_or_else(Instant::now);
@@ -182,6 +192,14 @@ fn spin_loop(
                             qos: qos_from_r2r(info.qos_profile),
                         }
                     };
+                    // Derive a subscription QoS that matches the discovered
+                    // publishers. Reading `qos_profile` off each TopicEndpointInfo
+                    // requires inferring its private type — same constraint as
+                    // map_endpoint above — so we collect the QoS profiles into a
+                    // local Vec (r2r::QosProfile *is* nameable) before consuming
+                    // pubs_info into publisher_infos.
+                    let publisher_qos: Vec<r2r::QosProfile> =
+                        pubs_info.iter().map(|p| p.qos_profile.clone()).collect();
                     let publisher_infos: Vec<EndpointInfo> =
                         pubs_info.into_iter().map(map_endpoint).collect();
 
@@ -197,51 +215,62 @@ fn spin_loop(
                         subscribers: Some(subscriber_infos),
                     });
 
-                    if known.contains_key(name) {
-                        continue;
-                    }
-                    let _ = event_tx.send(BackendEvent::Topic {
-                        name: name.clone(),
-                        type_name: ty.clone(),
-                        publishers,
-                        subscribers: 0,
+                    let state = known.entry(name.clone()).or_insert(TopicState {
+                        announced: false,
+                        subscribed: false,
                     });
-                    known.insert(name.clone(), ty.clone());
 
-                    // Per-topic sample forwarder. subscribe_raw for accurate
-                    // wire-byte counts; decode via WrappedNativeMsgUntyped.
-                    if let Ok(stream) = node.subscribe_raw(name, ty, r2r::QosProfile::default()) {
-                        let name_owned = name.clone();
-                        let ty_owned = ty.clone();
-                        let tx = event_tx.clone();
-                        let _ = spawner.spawn_local(async move {
-                            let mut stream = stream;
-                            let mut decoder =
-                                r2r::WrappedNativeMsgUntyped::new_from(&ty_owned).ok();
-                            let mut emitted_decode_failure = false;
-                            while let Some(bytes) = stream.next().await {
-                                let (value, decode_failed) =
-                                    decode_sample(decoder.as_mut(), &bytes);
-                                if decode_failed && !emitted_decode_failure {
-                                    emitted_decode_failure = true;
-                                    let _ = tx.send(BackendEvent::DecodeFailure {
-                                        topic: name_owned.clone(),
-                                        type_name: ty_owned.clone(),
-                                    });
-                                }
-                                if tx
-                                    .send(BackendEvent::Sample {
-                                        name: name_owned.clone(),
-                                        bytes: bytes.len() as u32,
-                                        value,
-                                        at: Instant::now(),
-                                    })
-                                    .is_err()
-                                {
-                                    break;
-                                }
-                            }
+                    if !state.announced {
+                        let _ = event_tx.send(BackendEvent::Topic {
+                            name: name.clone(),
+                            type_name: ty.clone(),
+                            publishers,
+                            subscribers: 0,
                         });
+                        state.announced = true;
+                    }
+
+                    // Defer the subscription until at least one publisher is
+                    // visible so we can pick a QoS that actually matches.
+                    // A Reliable/Volatile default subscriber will silently
+                    // never deliver samples for BestEffort publishers — the
+                    // exact "topic shows up, no Hz/BW" symptom we used to hit.
+                    if !state.subscribed && !publisher_qos.is_empty() {
+                        let sub_qos = derive_compatible_qos(&publisher_qos);
+                        if let Ok(stream) = node.subscribe_raw(name, ty, sub_qos) {
+                            let name_owned = name.clone();
+                            let ty_owned = ty.clone();
+                            let tx = event_tx.clone();
+                            let _ = spawner.spawn_local(async move {
+                                let mut stream = stream;
+                                let mut decoder =
+                                    r2r::WrappedNativeMsgUntyped::new_from(&ty_owned).ok();
+                                let mut emitted_decode_failure = false;
+                                while let Some(bytes) = stream.next().await {
+                                    let (value, decode_failed) =
+                                        decode_sample(decoder.as_mut(), &bytes);
+                                    if decode_failed && !emitted_decode_failure {
+                                        emitted_decode_failure = true;
+                                        let _ = tx.send(BackendEvent::DecodeFailure {
+                                            topic: name_owned.clone(),
+                                            type_name: ty_owned.clone(),
+                                        });
+                                    }
+                                    if tx
+                                        .send(BackendEvent::Sample {
+                                            name: name_owned.clone(),
+                                            bytes: bytes.len() as u32,
+                                            value,
+                                            at: Instant::now(),
+                                        })
+                                        .is_err()
+                                    {
+                                        break;
+                                    }
+                                }
+                            });
+                            state.subscribed = true;
+                        }
                     }
                 }
 
@@ -347,6 +376,42 @@ fn is_json_leaf_primitive(v: &serde_json::Value) -> bool {
             | serde_json::Value::Number(_)
             | serde_json::Value::String(_)
     )
+}
+
+/// Pick a subscription QoS that is request-compatible with every observed
+/// publisher on a topic. DDS compatibility is "subscriber no stricter than
+/// publisher": a BestEffort subscriber accepts both BestEffort and Reliable
+/// publishers; a Volatile subscriber accepts both Volatile and TransientLocal
+/// publishers. So if *any* publisher uses the weaker policy, the subscriber
+/// must drop to that policy or it will silently never match.
+///
+/// History / depth do not gate matching, so we keep KeepLast with a small
+/// depth. Deadline, lifespan, and liveliness are left at default — the
+/// inspector is short-lived and read-only, so loose values are fine.
+fn derive_compatible_qos(publisher_qos: &[r2r::QosProfile]) -> r2r::QosProfile {
+    use r2r::qos::{DurabilityPolicy, ReliabilityPolicy};
+
+    let mut qos = r2r::QosProfile::default();
+
+    let any_best_effort = publisher_qos
+        .iter()
+        .any(|q| matches!(q.reliability, ReliabilityPolicy::BestEffort));
+    qos.reliability = if any_best_effort {
+        ReliabilityPolicy::BestEffort
+    } else {
+        ReliabilityPolicy::Reliable
+    };
+
+    let any_volatile = publisher_qos
+        .iter()
+        .any(|q| matches!(q.durability, DurabilityPolicy::Volatile));
+    qos.durability = if any_volatile {
+        DurabilityPolicy::Volatile
+    } else {
+        DurabilityPolicy::TransientLocal
+    };
+
+    qos
 }
 
 fn qos_from_r2r(q: r2r::QosProfile) -> QosSnapshot {
@@ -527,6 +592,46 @@ mod tests {
         };
         assert_eq!(arr.len(), count);
         assert!(matches!(arr[0], DynamicValue::Struct(_)));
+    }
+
+    #[test]
+    fn derive_qos_drops_to_best_effort_when_any_publisher_is_best_effort() {
+        use r2r::qos::{DurabilityPolicy, ReliabilityPolicy};
+        let mut p1 = r2r::QosProfile::default();
+        p1.reliability = ReliabilityPolicy::Reliable;
+        p1.durability = DurabilityPolicy::Volatile;
+        let mut p2 = r2r::QosProfile::default();
+        p2.reliability = ReliabilityPolicy::BestEffort;
+        p2.durability = DurabilityPolicy::Volatile;
+        let q = derive_compatible_qos(&[p1, p2]);
+        assert!(matches!(q.reliability, ReliabilityPolicy::BestEffort));
+        assert!(matches!(q.durability, DurabilityPolicy::Volatile));
+    }
+
+    #[test]
+    fn derive_qos_stays_reliable_when_all_publishers_are_reliable() {
+        use r2r::qos::{DurabilityPolicy, ReliabilityPolicy};
+        let mut p = r2r::QosProfile::default();
+        p.reliability = ReliabilityPolicy::Reliable;
+        p.durability = DurabilityPolicy::TransientLocal;
+        let q = derive_compatible_qos(&[p.clone(), p]);
+        assert!(matches!(q.reliability, ReliabilityPolicy::Reliable));
+        // All publishers TransientLocal -> subscriber can stay TransientLocal
+        // (a TL subscriber matches a TL publisher and gets late-joiner history).
+        assert!(matches!(q.durability, DurabilityPolicy::TransientLocal));
+    }
+
+    #[test]
+    fn derive_qos_drops_to_volatile_when_any_publisher_is_volatile() {
+        use r2r::qos::{DurabilityPolicy, ReliabilityPolicy};
+        let mut tl = r2r::QosProfile::default();
+        tl.durability = DurabilityPolicy::TransientLocal;
+        let mut vol = r2r::QosProfile::default();
+        vol.durability = DurabilityPolicy::Volatile;
+        let q = derive_compatible_qos(&[tl, vol]);
+        assert!(matches!(q.durability, DurabilityPolicy::Volatile));
+        // All publishers default reliability (Reliable) -> sub stays Reliable.
+        assert!(matches!(q.reliability, ReliabilityPolicy::Reliable));
     }
 
     #[test]

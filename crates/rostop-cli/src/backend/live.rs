@@ -131,17 +131,7 @@ fn spin_loop(
 
     let mut pool = LocalPool::new();
     let spawner = pool.spawner();
-    // Per-topic state. `announced` is set after we emit the Topic event;
-    // `subscribed` is set after subscribe_raw succeeds with a QoS derived
-    // from the topic's publishers. They are tracked separately so a topic
-    // discovered before any publisher exists (e.g. the local node creating
-    // it ahead of any peers) still appears in the UI, and the subscription
-    // is created later once we can pick a compatible QoS.
-    struct TopicState {
-        announced: bool,
-        subscribed: bool,
-    }
-    let mut known: HashMap<String, TopicState> = HashMap::new();
+    let mut known: HashMap<String, String> = HashMap::new();
     let mut last_poll = Instant::now()
         .checked_sub(GRAPH_POLL_INTERVAL)
         .unwrap_or_else(Instant::now);
@@ -215,62 +205,63 @@ fn spin_loop(
                         subscribers: Some(subscriber_infos),
                     });
 
-                    let state = known.entry(name.clone()).or_insert(TopicState {
-                        announced: false,
-                        subscribed: false,
-                    });
-
-                    if !state.announced {
-                        let _ = event_tx.send(BackendEvent::Topic {
-                            name: name.clone(),
-                            type_name: ty.clone(),
-                            publishers,
-                            subscribers: 0,
-                        });
-                        state.announced = true;
+                    if known.contains_key(name) {
+                        continue;
                     }
+                    let _ = event_tx.send(BackendEvent::Topic {
+                        name: name.clone(),
+                        type_name: ty.clone(),
+                        publishers,
+                        subscribers: 0,
+                    });
+                    known.insert(name.clone(), ty.clone());
 
-                    // Defer the subscription until at least one publisher is
-                    // visible so we can pick a QoS that actually matches.
-                    // A Reliable/Volatile default subscriber will silently
-                    // never deliver samples for BestEffort publishers — the
-                    // exact "topic shows up, no Hz/BW" symptom we used to hit.
-                    if !state.subscribed && !publisher_qos.is_empty() {
-                        let sub_qos = derive_compatible_qos(&publisher_qos);
-                        if let Ok(stream) = node.subscribe_raw(name, ty, sub_qos) {
-                            let name_owned = name.clone();
-                            let ty_owned = ty.clone();
-                            let tx = event_tx.clone();
-                            let _ = spawner.spawn_local(async move {
-                                let mut stream = stream;
-                                let mut decoder =
-                                    r2r::WrappedNativeMsgUntyped::new_from(&ty_owned).ok();
-                                let mut emitted_decode_failure = false;
-                                while let Some(bytes) = stream.next().await {
-                                    let (value, decode_failed) =
-                                        decode_sample(decoder.as_mut(), &bytes);
-                                    if decode_failed && !emitted_decode_failure {
-                                        emitted_decode_failure = true;
-                                        let _ = tx.send(BackendEvent::DecodeFailure {
-                                            topic: name_owned.clone(),
-                                            type_name: ty_owned.clone(),
-                                        });
-                                    }
-                                    if tx
-                                        .send(BackendEvent::Sample {
-                                            name: name_owned.clone(),
-                                            bytes: bytes.len() as u32,
-                                            value,
-                                            at: Instant::now(),
-                                        })
-                                        .is_err()
-                                    {
-                                        break;
-                                    }
+                    // Per-topic sample forwarder. subscribe_raw for accurate
+                    // wire-byte counts; decode via WrappedNativeMsgUntyped.
+                    //
+                    // QoS: a Reliable/Volatile default subscriber will never
+                    // match a BestEffort publisher. When the discovery layer
+                    // already gave us per-publisher QoS, derive a compatible
+                    // profile from it; otherwise fall back to the default
+                    // (which is what main shipped, and is fine for the
+                    // Reliable+Volatile publishers that make up most graphs).
+                    let sub_qos = if publisher_qos.is_empty() {
+                        r2r::QosProfile::default()
+                    } else {
+                        derive_compatible_qos(&publisher_qos)
+                    };
+                    if let Ok(stream) = node.subscribe_raw(name, ty, sub_qos) {
+                        let name_owned = name.clone();
+                        let ty_owned = ty.clone();
+                        let tx = event_tx.clone();
+                        let _ = spawner.spawn_local(async move {
+                            let mut stream = stream;
+                            let mut decoder =
+                                r2r::WrappedNativeMsgUntyped::new_from(&ty_owned).ok();
+                            let mut emitted_decode_failure = false;
+                            while let Some(bytes) = stream.next().await {
+                                let (value, decode_failed) =
+                                    decode_sample(decoder.as_mut(), &bytes);
+                                if decode_failed && !emitted_decode_failure {
+                                    emitted_decode_failure = true;
+                                    let _ = tx.send(BackendEvent::DecodeFailure {
+                                        topic: name_owned.clone(),
+                                        type_name: ty_owned.clone(),
+                                    });
                                 }
-                            });
-                            state.subscribed = true;
-                        }
+                                if tx
+                                    .send(BackendEvent::Sample {
+                                        name: name_owned.clone(),
+                                        bytes: bytes.len() as u32,
+                                        value,
+                                        at: Instant::now(),
+                                    })
+                                    .is_err()
+                                {
+                                    break;
+                                }
+                            }
+                        });
                     }
                 }
 

@@ -220,12 +220,8 @@ impl App {
                     publishers,
                     subscribers,
                 } => {
-                    let publisher_count = publishers
-                        .as_ref()
-                        .map(|items| items.len() as u32);
-                    let subscriber_count = subscribers
-                        .as_ref()
-                        .map(|items| items.len() as u32);
+                    let publisher_count = publishers.as_ref().map(|items| items.len() as u32);
+                    let subscriber_count = subscribers.as_ref().map(|items| items.len() as u32);
                     if let Some((current_publishers, current_subscribers)) = self
                         .registry
                         .get(&topic)

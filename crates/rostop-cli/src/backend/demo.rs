@@ -156,24 +156,33 @@ fn build_value(t: &DemoTopic) -> DynamicValue {
             ("encoding".into(), DynamicValue::Str("rgb8".into())),
             ("data".into(), DynamicValue::Bytes(720 * 1280 * 3)),
         ]),
-        "geometry_msgs/msg/Twist" => DynamicValue::Struct(vec![
-            (
-                "linear".into(),
-                DynamicValue::Struct(vec![
-                    ("x".into(), DynamicValue::F64(0.45 + 0.05 * phase)),
-                    ("y".into(), DynamicValue::F64(0.0)),
-                    ("z".into(), DynamicValue::F64(0.0)),
-                ]),
-            ),
-            (
-                "angular".into(),
-                DynamicValue::Struct(vec![
-                    ("x".into(), DynamicValue::F64(0.0)),
-                    ("y".into(), DynamicValue::F64(0.0)),
-                    ("z".into(), DynamicValue::F64(0.3 * phase)),
-                ]),
-            ),
-        ]),
+        "geometry_msgs/msg/Twist" => {
+            // A low-frequency command with a small high-frequency ripple makes
+            // the demo waveform immediately useful: the overall motion and
+            // controller noise are both visible at different time windows.
+            let linear_x = 0.45
+                + 0.08 * (std::f64::consts::TAU * 0.7 * now_s).sin()
+                + 0.018 * (std::f64::consts::TAU * 6.0 * now_s).sin();
+            let angular_z = 0.32 * (std::f64::consts::TAU * 0.35 * now_s).sin();
+            DynamicValue::Struct(vec![
+                (
+                    "linear".into(),
+                    DynamicValue::Struct(vec![
+                        ("x".into(), DynamicValue::F64(linear_x)),
+                        ("y".into(), DynamicValue::F64(0.0)),
+                        ("z".into(), DynamicValue::F64(0.0)),
+                    ]),
+                ),
+                (
+                    "angular".into(),
+                    DynamicValue::Struct(vec![
+                        ("x".into(), DynamicValue::F64(0.0)),
+                        ("y".into(), DynamicValue::F64(0.0)),
+                        ("z".into(), DynamicValue::F64(angular_z)),
+                    ]),
+                ),
+            ])
+        }
         "tf2_msgs/msg/TFMessage" => DynamicValue::Struct(vec![(
             "transforms".into(),
             DynamicValue::Array(vec![DynamicValue::Struct(vec![

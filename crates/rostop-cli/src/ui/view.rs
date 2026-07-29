@@ -2,14 +2,17 @@
 
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
+use ratatui::symbols;
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Borders, Cell, Paragraph, Row, Table};
+use ratatui::widgets::{
+    Axis, Block, Borders, Cell, Chart, Dataset, GraphType, Paragraph, Row, Table,
+};
 use ratatui::Frame;
 use rostop_core::endpoint::{gid_hex_short, sort_endpoints, EndpointInfo, EndpointSets};
 use rostop_core::message::{level_rows, path_segments};
 use rostop_core::registry::SortOrder;
 
-use crate::app::{App, Focus};
+use crate::app::{padded_bounds, App, Focus};
 use crate::ui::rows::{fmt_bps, TopicTableRow};
 
 /// How long (whole seconds) a topic must be known in the graph with zero
@@ -72,6 +75,11 @@ fn render_fullscreen_topic(f: &mut Frame, area: Rect, app: &App, rows: &[TopicTa
         return;
     };
 
+    if app.scope.active {
+        render_scope(f, area, app, row);
+        return;
+    }
+
     let title = format!(
         " focus ─ {} ─ {} ─ {}+{} ",
         row.name,
@@ -104,6 +112,167 @@ fn render_fullscreen_topic(f: &mut Frame, area: Rect, app: &App, rows: &[TopicTa
     render_fullscreen_metrics(f, layout[0], app, row);
     render_fullscreen_endpoints(f, layout[1], endpoints);
     render_fullscreen_message_tree(f, layout[2], app, &row.name);
+}
+
+fn render_scope(f: &mut Frame, area: Rect, app: &App, row: &TopicTableRow) {
+    let field = app.scope.field_label();
+    let window_secs = app.scope.window.as_secs_f64();
+    let now = std::time::Instant::now();
+    let stats = app.scope.series.stats(now, app.scope.window);
+    let bounds = app
+        .scope
+        .locked_y
+        .or_else(|| stats.map(|stats| padded_bounds(stats.min, stats.max)))
+        .unwrap_or((-1.0, 1.0));
+    let plot_width = area.width.saturating_sub(12) as usize;
+    let points = app
+        .scope
+        .series
+        .plot_points(now, app.scope.window, plot_width);
+
+    let outer = Block::default()
+        .borders(Borders::ALL)
+        .border_style(
+            Style::default()
+                .fg(Color::LightCyan)
+                .add_modifier(Modifier::BOLD),
+        )
+        .title(Line::from(vec![
+            Span::styled(
+                " waveform ",
+                Style::default().fg(Color::Black).bg(Color::Cyan),
+            ),
+            Span::styled(row.name.clone(), Style::default().fg(Color::Yellow)),
+            Span::raw(" ─ "),
+            Span::styled(field.clone(), Style::default().fg(Color::LightCyan)),
+            Span::raw(" "),
+        ]));
+    let inner = outer.inner(area);
+    f.render_widget(outer, area);
+
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Length(3), Constraint::Min(4)])
+        .split(inner);
+
+    let (current, min, max, mean) = stats
+        .map(|stats| (stats.current, stats.min, stats.max, stats.mean))
+        .unwrap_or((0.0, 0.0, 0.0, 0.0));
+    let lock = if app.scope.locked_y.is_some() {
+        "LOCKED"
+    } else {
+        "AUTO"
+    };
+    let summary = vec![
+        Line::from(vec![
+            metric("NOW", current, Color::Yellow),
+            Span::raw("    "),
+            metric("MIN", min, Color::Blue),
+            Span::raw("    "),
+            metric("MAX", max, Color::Magenta),
+            Span::raw("    "),
+            metric("MEAN", mean, Color::Green),
+        ]),
+        Line::from(vec![
+            Span::styled(
+                format!(" {window_secs:>4.0}s window "),
+                Style::default().fg(Color::Black).bg(Color::DarkGray),
+            ),
+            Span::raw("  "),
+            Span::styled(
+                format!(" Y {lock} "),
+                if app.scope.locked_y.is_some() {
+                    Style::default().fg(Color::Black).bg(Color::Yellow)
+                } else {
+                    Style::default().fg(Color::Black).bg(Color::Green)
+                },
+            ),
+            Span::raw(format!(
+                "  field {}/{}",
+                app.scope.selected_field.saturating_add(1),
+                app.scope.fields.len()
+            )),
+        ]),
+    ];
+    f.render_widget(Paragraph::new(summary), chunks[0]);
+
+    if points.is_empty() {
+        f.render_widget(
+            Paragraph::new(vec![
+                Line::from(""),
+                Line::from(Span::styled(
+                    if app.scope.fields.is_empty() {
+                        "  No numeric fields in this message"
+                    } else {
+                        "  Collecting samples…"
+                    },
+                    Style::default().fg(Color::DarkGray),
+                )),
+            ])
+            .block(Block::default().borders(Borders::TOP)),
+            chunks[1],
+        );
+        return;
+    }
+
+    let datasets = vec![Dataset::default()
+        .name(field)
+        .marker(symbols::Marker::Braille)
+        .graph_type(GraphType::Line)
+        .style(
+            Style::default()
+                .fg(Color::LightCyan)
+                .add_modifier(Modifier::BOLD),
+        )
+        .data(&points)];
+    let chart = Chart::new(datasets)
+        .block(
+            Block::default()
+                .borders(Borders::TOP)
+                .border_style(Style::default().fg(Color::DarkGray)),
+        )
+        .x_axis(
+            Axis::default()
+                .style(Style::default().fg(Color::DarkGray))
+                .bounds([-window_secs, 0.0])
+                .labels(vec![
+                    Span::raw(format!("-{window_secs:.0}s")),
+                    Span::raw(format!("-{:.0}s", window_secs / 2.0)),
+                    Span::raw("now"),
+                ]),
+        )
+        .y_axis(
+            Axis::default()
+                .style(Style::default().fg(Color::DarkGray))
+                .bounds([bounds.0, bounds.1])
+                .labels(vec![
+                    Span::raw(format_value(bounds.0)),
+                    Span::raw(format_value((bounds.0 + bounds.1) / 2.0)),
+                    Span::raw(format_value(bounds.1)),
+                ]),
+        );
+    f.render_widget(chart, chunks[1]);
+}
+
+fn metric(label: &'static str, value: f64, color: Color) -> Span<'static> {
+    Span::styled(
+        format!(" {label} {} ", format_value(value)),
+        Style::default()
+            .fg(Color::Black)
+            .bg(color)
+            .add_modifier(Modifier::BOLD),
+    )
+}
+
+fn format_value(value: f64) -> String {
+    let magnitude = value.abs();
+    if magnitude >= 100_000.0 || (magnitude > 0.0 && magnitude < 0.001) {
+        format!("{value:.2e}")
+    } else if magnitude >= 100.0 {
+        format!("{value:.1}")
+    } else {
+        format!("{value:.3}")
+    }
 }
 
 /// Per-section row cap. Each endpoint takes 2 lines (header + qos detail).
@@ -576,7 +745,9 @@ fn render_sparklines(f: &mut Frame, area: Rect, app: &App, rows: &[TopicTableRow
 }
 
 fn render_status_bar(f: &mut Frame, area: Rect, app: &App) {
-    let mode = if app.fullscreen {
+    let mode = if app.scope.active {
+        "[SCOPE]".to_string()
+    } else if app.fullscreen {
         "[FOCUS]".to_string()
     } else if app.paused {
         "[PAUSED]".to_string()
@@ -592,11 +763,13 @@ fn render_status_bar(f: &mut Frame, area: Rect, app: &App) {
         SortOrder::Descending => "▼",
     };
     let sort = format!("sort:{:?}{arrow}", app.sort_key);
-    let help = if app.fullscreen {
-        "j/k:move  l/Enter:drill-in  h:drill-out  f/Esc:back  q:quit"
+    let help = if app.scope.active {
+        "Tab:field  +/-:window  0:reset  a:auto/lock  p:pause  w/Esc:back  q:quit"
+    } else if app.fullscreen {
+        "j/k:move  l/Enter:drill-in  h:drill-out  w:waveform  f/Esc:back  q:quit"
     } else {
         match app.focus {
-            Focus::Topics => "j/k:move  l:inspect  f:focus  s:sort  p:pause  q:quit",
+            Focus::Topics => "j/k:move  l:inspect  f:focus  w:waveform  s:sort  p:pause  q:quit",
             Focus::Inspector => "j/k:move  l:drill-in  h:drill-out/back  p:pause  q:quit",
         }
     };

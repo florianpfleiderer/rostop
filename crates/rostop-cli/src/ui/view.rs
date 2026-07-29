@@ -175,7 +175,7 @@ fn render_scope(f: &mut Frame, area: Rect, app: &App, row: &TopicTableRow) {
         ]),
         Line::from(vec![
             Span::styled(
-                format!(" {:>4.0}s window ", window_secs),
+                format!(" {window_secs:>4.0}s window "),
                 Style::default().fg(Color::Black).bg(Color::DarkGray),
             ),
             Span::raw("  "),

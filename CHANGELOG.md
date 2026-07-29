@@ -97,6 +97,26 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- **Live sample delivery is now bounded and fair to the UI.** High-rate topics
+  can no longer grow the backend event queue without limit or force a frame to
+  drain an arbitrary number of samples before handling terminal input.
+- **Topics that change type are re-subscribed safely.** The previous
+  subscription is cancelled, its UI state is removed, and a fresh subscription
+  is created for the newly discovered type.
+- **Publisher/subscriber counts now refresh with the ROS graph.** The topic
+  table no longer retains its initial counts while endpoint details change.
+- **Live backend now matches publisher QoS instead of always subscribing
+  with the ROS 2 default.** Previously every subscription used
+  `r2r::QosProfile::default()` (Reliable / Volatile), which silently failed
+  to match BestEffort publishers — the topic still appeared via the graph
+  poll, but no samples were ever delivered, so Hz / BW / jitter stayed
+  blank. When the discovery layer reports publisher QoS, subscribe with a
+  derived profile that drops to BestEffort if any publisher is BestEffort
+  and to Volatile if any publisher is Volatile (TransientLocal is
+  preserved when every publisher offers it, so latched topics like
+  `/tf_static` still deliver their cached value). When per-publisher QoS
+  is not yet available at first sighting, fall back to the previous
+  default so the subscription still happens immediately.
 - **Topic table auto-scrolls to keep the selected row visible.** Previously,
   on a terminal too short to display every discovered topic, pressing `j`/`G`
   past the last visible row moved `app.selected` off-screen and the

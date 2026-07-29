@@ -199,6 +199,56 @@ fn fullscreen_panel_lists_publishers_and_subscribers() {
 }
 
 #[test]
+fn waveform_scope_renders_live_numeric_signal_and_controls() {
+    let mut handle = AppHandle::demo();
+    handle.tick(Duration::from_millis(100));
+    let elapsed = handle.app.elapsed_ns();
+    let rows = handle.app.registry.sorted_by(
+        rostop_core::registry::SortKey::Name,
+        rostop_core::registry::SortOrder::Ascending,
+        elapsed,
+    );
+    handle.app.selected = rows
+        .iter()
+        .position(|entry| entry.name == "/cmd_vel")
+        .expect("demo exposes /cmd_vel");
+    handle.app.fullscreen = true;
+    handle.app.enter_scope("/cmd_vel");
+    handle.tick(Duration::from_millis(250));
+
+    let backend = TestBackend::new(120, 32);
+    let mut terminal = Terminal::new(backend).unwrap();
+    render_once(&mut terminal, &mut handle);
+
+    let buf = terminal.backend().buffer().clone();
+    let dump = (0..buf.area.height)
+        .map(|y| {
+            (0..buf.area.width)
+                .map(|x| buf[(x, y)].symbol())
+                .collect::<String>()
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    for needle in [
+        "waveform",
+        "/cmd_vel",
+        "linear.x",
+        "NOW",
+        "MIN",
+        "MAX",
+        "MEAN",
+        "[SCOPE]",
+        "Tab:field",
+    ] {
+        assert!(
+            dump.contains(needle),
+            "expected {needle:?} in waveform scope:\n{dump}"
+        );
+    }
+}
+
+#[test]
 fn rendering_with_no_data_does_not_panic() {
     let mut app = AppHandle::demo();
     // Don't tick the backend — registry is empty.

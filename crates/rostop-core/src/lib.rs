@@ -7,5 +7,6 @@
 pub mod endpoint;
 pub mod message;
 pub mod registry;
+pub mod scope;
 pub mod sparkline;
 pub mod stats;

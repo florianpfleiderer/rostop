@@ -53,6 +53,12 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- **Waveform scope for numeric message fields.** Press `w` on a topic to open
+  a full-terminal Braille line chart with live current/min/max/mean metrics,
+  spike-preserving decimation, selectable nested numeric fields, 1–30 second
+  windows, and switchable auto/locked Y scaling. The demo `/cmd_vel` signal
+  includes both slow motion and controller ripple so the view is useful
+  immediately without a ROS system.
 - **Status-bar mismatch hint.** When a `subscribe_raw` payload fails to decode
   against the type-support compiled into this build (the signature of a ROS 2
   distro / RMW mismatch — e.g. a Jazzy-built rostop subscribed to a Humble

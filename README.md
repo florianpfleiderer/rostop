@@ -179,6 +179,7 @@ If that's empty, rostop will be empty too — fix discovery first.
 | `l` / `→`      | step **into** the selected item: from the topic table moves focus to the inspector; from the inspector descends into the selected struct/array field |
 | `h` / `←`      | step **out**: pop one inspector level, or return focus to the topic table when already at the message root |
 | `f`            | from the topic table, open a **focus** view — a single-topic panel filling the whole terminal (bigger metrics, wider sparklines, full-width message tree). Press `f` again (or `Esc`) to return to the split-pane layout |
+| `w`            | open the selected topic's **waveform scope**. `Tab`/`Shift-Tab` selects numeric fields, `+`/`-` changes the time window, `0` resets it, and `a` locks/unlocks the Y axis |
 | `s`            | cycle sort key (Name → Hz → BW → Type). Order auto-flips: Name/Type ascending, Hz/BW descending |
 | `p`            | pause / resume sample ingestion   |
 | `q` / `Ctrl-C` | quit                              |

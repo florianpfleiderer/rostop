@@ -16,6 +16,7 @@ use ratatui::Terminal;
 use rostop_core::endpoint::EndpointSets;
 use rostop_core::message::{level_rows, DynamicValue};
 use rostop_core::registry::{SortKey, SortOrder, TopicRegistry};
+use rostop_core::scope::{display_path, numeric_paths, numeric_value, NumericPath, TimeSeries};
 use rostop_core::sparkline::Sparkline;
 
 use crate::backend::{BackendEvent, RosBackend};
@@ -26,6 +27,37 @@ use crate::ui;
 pub enum Focus {
     Topics,
     Inspector,
+}
+
+pub struct ScopeState {
+    pub active: bool,
+    pub topic: Option<String>,
+    pub fields: Vec<NumericPath>,
+    pub selected_field: usize,
+    pub series: TimeSeries,
+    pub window: Duration,
+    pub locked_y: Option<(f64, f64)>,
+}
+
+impl ScopeState {
+    fn new() -> Self {
+        Self {
+            active: false,
+            topic: None,
+            fields: Vec::new(),
+            selected_field: 0,
+            series: TimeSeries::new(Duration::from_secs(30), 60_000),
+            window: Duration::from_secs(5),
+            locked_y: None,
+        }
+    }
+
+    pub fn field_label(&self) -> String {
+        self.fields
+            .get(self.selected_field)
+            .map(|path| display_path(path))
+            .unwrap_or_else(|| "(no numeric fields)".into())
+    }
 }
 
 pub struct App {
@@ -72,6 +104,8 @@ pub struct App {
     /// (rendered as "(not available)"). Replaced wholesale on every
     /// `BackendEvent::Endpoints`; cleared when a topic disappears.
     pub endpoints: HashMap<String, EndpointSets>,
+    /// Waveform scope state for the selected topic in focus mode.
+    pub scope: ScopeState,
 }
 
 impl App {
@@ -108,6 +142,7 @@ impl App {
             topic_table_state: TableState::default(),
             fullscreen: false,
             endpoints: HashMap::new(),
+            scope: ScopeState::new(),
         }
     }
 
@@ -208,11 +243,21 @@ impl App {
                     self.hz_sparks.remove(&name);
                     self.bw_sparks.remove(&name);
                     self.endpoints.remove(&name);
+                    if self.scope.topic.as_deref() == Some(name.as_str()) {
+                        self.scope.active = false;
+                        self.scope.topic = None;
+                        self.scope.fields.clear();
+                        self.scope.series.clear();
+                    }
                 }
                 BackendEvent::Sample {
-                    name, bytes, value, ..
+                    name,
+                    bytes,
+                    value,
+                    at,
                 } => {
                     self.registry.record(&name, elapsed_ns, bytes);
+                    self.capture_scope_sample(&name, &value, at);
                     self.last_message.insert(name, value);
                 }
                 BackendEvent::Endpoints {
@@ -302,6 +347,85 @@ impl App {
             SortKey::Hz | SortKey::Bandwidth => SortOrder::Descending,
         };
     }
+
+    pub fn enter_scope(&mut self, topic: &str) {
+        self.scope.active = true;
+        self.scope.topic = Some(topic.to_string());
+        self.scope.fields = self
+            .last_message
+            .get(topic)
+            .map(numeric_paths)
+            .unwrap_or_default();
+        self.scope.selected_field = 0;
+        self.scope.locked_y = None;
+        self.scope.series.clear();
+    }
+
+    pub fn leave_scope(&mut self) {
+        self.scope.active = false;
+    }
+
+    pub fn cycle_scope_field(&mut self, delta: i32) {
+        if self.scope.fields.is_empty() {
+            return;
+        }
+        self.scope.selected_field = (self.scope.selected_field as i32 + delta)
+            .rem_euclid(self.scope.fields.len() as i32) as usize;
+        self.scope.series.clear();
+        self.scope.locked_y = None;
+    }
+
+    pub fn zoom_scope(&mut self, direction: i32) {
+        const WINDOWS: [u64; 5] = [1, 2, 5, 10, 30];
+        let current = WINDOWS
+            .iter()
+            .position(|seconds| *seconds == self.scope.window.as_secs())
+            .unwrap_or(2);
+        let next = (current as i32 + direction)
+            .clamp(0, WINDOWS.len() as i32 - 1) as usize;
+        self.scope.window = Duration::from_secs(WINDOWS[next]);
+        self.scope.locked_y = None;
+    }
+
+    pub fn reset_scope_window(&mut self) {
+        self.scope.window = Duration::from_secs(5);
+        self.scope.locked_y = None;
+    }
+
+    pub fn toggle_scope_y_lock(&mut self) {
+        if self.scope.locked_y.is_some() {
+            self.scope.locked_y = None;
+            return;
+        }
+        if let Some(stats) = self.scope.series.stats(Instant::now(), self.scope.window) {
+            self.scope.locked_y = Some(padded_bounds(stats.min, stats.max));
+        }
+    }
+
+    fn capture_scope_sample(&mut self, topic: &str, value: &DynamicValue, at: Instant) {
+        if !self.scope.active || self.scope.topic.as_deref() != Some(topic) {
+            return;
+        }
+        if self.scope.fields.is_empty() {
+            self.scope.fields = numeric_paths(value);
+        }
+        let Some(path) = self.scope.fields.get(self.scope.selected_field) else {
+            return;
+        };
+        if let Some(value) = numeric_value(value, path) {
+            self.scope.series.push(at, value);
+        }
+    }
+}
+
+pub fn padded_bounds(min: f64, max: f64) -> (f64, f64) {
+    if (max - min).abs() < f64::EPSILON {
+        let pad = min.abs().max(1.0) * 0.05;
+        (min - pad, max + pad)
+    } else {
+        let pad = (max - min) * 0.08;
+        (min - pad, max + pad)
+    }
 }
 
 pub fn run(mut app: App) -> Result<()> {
@@ -350,6 +474,27 @@ fn event_loop(terminal: &mut Terminal<CrosstermBackend<Stdout>>, app: &mut App) 
                     match (key.code, key.modifiers) {
                         (KeyCode::Char('q'), _) => break,
                         (KeyCode::Char('c'), KeyModifiers::CONTROL) => break,
+                        (KeyCode::Esc, _) if app.scope.active => app.leave_scope(),
+                        (KeyCode::Char('w'), _) if app.scope.active => app.leave_scope(),
+                        (KeyCode::Tab, _) if app.scope.active => app.cycle_scope_field(1),
+                        (KeyCode::BackTab, _) if app.scope.active => app.cycle_scope_field(-1),
+                        (KeyCode::Char('+') | KeyCode::Char('='), _) if app.scope.active => {
+                            app.zoom_scope(-1);
+                        }
+                        (KeyCode::Char('-'), _) if app.scope.active => app.zoom_scope(1),
+                        (KeyCode::Char('0'), _) if app.scope.active => app.reset_scope_window(),
+                        (KeyCode::Char('a'), _) if app.scope.active => {
+                            app.toggle_scope_y_lock();
+                        }
+                        (KeyCode::Char('p'), _) if app.scope.active => {
+                            app.paused = !app.paused;
+                        }
+                        (_, _) if app.scope.active => {}
+                        (KeyCode::Char('w'), _) => {
+                            if let Some(topic) = selected_topic.as_deref() {
+                                app.enter_scope(topic);
+                            }
+                        }
                         // `f` toggles focus mode on the way in and on the
                         // way out, so the user can keep their hand on the
                         // same key. `Esc` works too for muscle memory.
@@ -405,6 +550,12 @@ fn event_loop(terminal: &mut Terminal<CrosstermBackend<Stdout>>, app: &mut App) 
                             // Leave focus pane = Topics so Esc lands the
                             // user back on the table they came from.
                             app.inspector_selected = 0;
+                        }
+                    }
+                    (KeyCode::Char('w'), _, Focus::Topics) => {
+                        if let Some(topic) = selected_topic.as_deref() {
+                            app.fullscreen = true;
+                            app.enter_scope(topic);
                         }
                     }
                     // Inspector-pane navigation.
@@ -520,6 +671,62 @@ mod tests {
         let entry = app.registry.get("/parameter_events").unwrap();
         assert_eq!(entry.publishers, 0);
         assert_eq!(entry.subscribers, 0);
+    }
+
+    #[test]
+    fn scope_captures_selected_numeric_field_with_event_time() {
+        let backend: Box<dyn RosBackend> = Box::new(DemoBackend::new());
+        let mut app = App::new(backend);
+        let initial = DynamicValue::Struct(vec![("value".into(), DynamicValue::F64(1.0))]);
+        app.last_message.insert("/signal".into(), initial);
+        app.enter_scope("/signal");
+
+        let at = Instant::now();
+        app.ingest_for_tests(vec![BackendEvent::Sample {
+            name: "/signal".into(),
+            bytes: 8,
+            value: DynamicValue::Struct(vec![("value".into(), DynamicValue::F64(2.5))]),
+            at,
+        }]);
+
+        let stats = app
+            .scope
+            .series
+            .stats(at, Duration::from_secs(1))
+            .expect("scope should contain the sample");
+        assert_eq!(stats.current, 2.5);
+        assert_eq!(app.scope.field_label(), "value");
+    }
+
+    #[test]
+    fn cycling_scope_field_clears_old_series() {
+        let backend: Box<dyn RosBackend> = Box::new(DemoBackend::new());
+        let mut app = App::new(backend);
+        app.last_message.insert(
+            "/signal".into(),
+            DynamicValue::Struct(vec![
+                ("a".into(), DynamicValue::F64(1.0)),
+                ("b".into(), DynamicValue::F64(2.0)),
+            ]),
+        );
+        app.enter_scope("/signal");
+        app.scope.series.push(Instant::now(), 1.0);
+
+        app.cycle_scope_field(1);
+
+        assert_eq!(app.scope.field_label(), "b");
+        assert!(app
+            .scope
+            .series
+            .stats(Instant::now(), Duration::from_secs(1))
+            .is_none());
+    }
+
+    #[test]
+    fn padded_scope_bounds_handle_constant_signals() {
+        let bounds = padded_bounds(-2.0, -2.0);
+        assert!(bounds.0 < -2.0);
+        assert!(bounds.1 > -2.0);
     }
 
     #[test]

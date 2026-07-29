@@ -13,6 +13,8 @@ use std::time::{Duration, Instant};
 use rostop_core::endpoint::EndpointInfo;
 use rostop_core::message::DynamicValue;
 
+use crate::domain::DomainId;
+
 /// Events flowing from the backend into the application state.
 #[derive(Debug, Clone)]
 pub enum BackendEvent {
@@ -60,6 +62,11 @@ pub trait RosBackend: Send {
 
     /// Human-readable name (shown in the title bar).
     fn label(&self) -> &'static str;
+
+    /// Active ROS domain, when this backend participates in a real DDS graph.
+    fn domain_id(&self) -> Option<DomainId> {
+        None
+    }
 }
 
 pub mod demo;

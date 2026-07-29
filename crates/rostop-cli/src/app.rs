@@ -22,6 +22,17 @@ use rostop_core::sparkline::Sparkline;
 use crate::backend::{BackendEvent, RosBackend};
 use crate::ui;
 
+#[derive(Default)]
+pub struct DomainScanView {
+    pub active: bool,
+    pub total: usize,
+    pub started: usize,
+    pub completed: usize,
+    pub finished: bool,
+    pub visible: Vec<crate::domain::DomainProbeResult>,
+    pub failures: Vec<(u16, String)>,
+}
+
 /// Which pane currently receives j/k/h/l input.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Focus {
@@ -106,6 +117,9 @@ pub struct App {
     pub endpoints: HashMap<String, EndpointSets>,
     /// Waveform scope state for the selected topic in focus mode.
     pub scope: ScopeState,
+    pub domain_scan_view: DomainScanView,
+    #[cfg(feature = "live")]
+    domain_scan: Option<crate::domain_scan::DomainScan>,
 }
 
 impl App {
@@ -143,6 +157,9 @@ impl App {
             fullscreen: false,
             endpoints: HashMap::new(),
             scope: ScopeState::new(),
+            domain_scan_view: DomainScanView::default(),
+            #[cfg(feature = "live")]
+            domain_scan: None,
         }
     }
 
@@ -416,6 +433,81 @@ impl App {
             self.scope.series.push(at, value);
         }
     }
+
+    pub fn start_domain_scan(&mut self) {
+        let Some(current) = self.backend.domain_id() else {
+            self.notice = Some("INFO: domain scanning requires the live backend".into());
+            return;
+        };
+        #[cfg(feature = "live")]
+        {
+            let mut domains: Vec<_> = (0..=10)
+                .filter_map(|value| crate::domain::DomainId::new(value).ok())
+                .collect();
+            if !domains.contains(&current) {
+                domains.push(current);
+                domains.sort();
+            }
+            match crate::domain_scan::DomainScan::start(
+                domains.iter().copied(),
+                crate::domain_scan::ScanConfig::default(),
+            ) {
+                Ok(scan) => {
+                    self.domain_scan_view = DomainScanView {
+                        active: true,
+                        total: domains.len(),
+                        ..DomainScanView::default()
+                    };
+                    self.domain_scan = Some(scan);
+                }
+                Err(error) => {
+                    self.notice = Some(format!("INFO: domain scan failed to start: {error}"));
+                }
+            }
+        }
+        #[cfg(not(feature = "live"))]
+        let _ = current;
+    }
+
+    pub fn poll_domain_scan(&mut self) {
+        #[cfg(feature = "live")]
+        if let Some(scan) = self.domain_scan.as_ref() {
+            while let Ok(update) = scan.updates.try_recv() {
+                match update {
+                    crate::domain_scan::ScanUpdate::Started(_) => {
+                        self.domain_scan_view.started += 1;
+                    }
+                    crate::domain_scan::ScanUpdate::Probed(result) => {
+                        self.domain_scan_view.completed += 1;
+                        if result.is_visible() {
+                            self.domain_scan_view.visible.push(result);
+                            self.domain_scan_view
+                                .visible
+                                .sort_by_key(|result| result.domain_id);
+                        }
+                    }
+                    crate::domain_scan::ScanUpdate::Failed { domain, message } => {
+                        self.domain_scan_view.completed += 1;
+                        if message != "scan cancelled" {
+                            self.domain_scan_view.failures.push((domain.get(), message));
+                        }
+                    }
+                    crate::domain_scan::ScanUpdate::Finished => {
+                        self.domain_scan_view.finished = true;
+                    }
+                }
+            }
+        }
+    }
+
+    pub fn close_domain_scan(&mut self) {
+        #[cfg(feature = "live")]
+        if let Some(scan) = self.domain_scan.take() {
+            scan.cancel();
+            drop(scan);
+        }
+        self.domain_scan_view.active = false;
+    }
 }
 
 pub fn padded_bounds(min: f64, max: f64) -> (f64, f64) {
@@ -438,6 +530,7 @@ pub fn run(mut app: App) -> Result<()> {
 fn event_loop(terminal: &mut Terminal<CrosstermBackend<Stdout>>, app: &mut App) -> Result<()> {
     let tick = Duration::from_millis(50);
     loop {
+        app.poll_domain_scan();
         if !app.paused {
             let events = app.backend.poll(Duration::from_millis(0));
             app.ingest(events);
@@ -465,6 +558,17 @@ fn event_loop(terminal: &mut Terminal<CrosstermBackend<Stdout>>, app: &mut App) 
         if event::poll(tick)? {
             if let Event::Key(key) = event::read()? {
                 if key.kind != KeyEventKind::Press {
+                    continue;
+                }
+                if app.domain_scan_view.active {
+                    match (key.code, key.modifiers) {
+                        (KeyCode::Char('q'), _) => break,
+                        (KeyCode::Char('c'), KeyModifiers::CONTROL) => break,
+                        (KeyCode::Esc, _) | (KeyCode::Char('D'), _) => {
+                            app.close_domain_scan();
+                        }
+                        _ => {}
+                    }
                     continue;
                 }
                 if app.fullscreen {
@@ -580,6 +684,7 @@ fn event_loop(terminal: &mut Terminal<CrosstermBackend<Stdout>>, app: &mut App) 
                     // Global keys (work regardless of focus).
                     (KeyCode::Char('s'), _, _) => app.cycle_sort(),
                     (KeyCode::Char('p'), _, _) => app.paused = !app.paused,
+                    (KeyCode::Char('D'), _, _) => app.start_domain_scan(),
                     _ => {}
                 }
             }

@@ -88,7 +88,8 @@ install -m755 rostop-${VERSION}-${DISTRO}-x86_64/rostop ~/.local/bin/
 
 # Either way:
 source /opt/ros/${DISTRO}/setup.bash
-rostop
+rostop                  # uses ROS_DOMAIN_ID, or domain 0 when unset
+rostop --domain 7       # explicit override, shown in the title bar
 ```
 
 `rostop-humble` and `rostop-jazzy` both ship `/usr/bin/rostop` and declare a mutual `Conflicts:`, so only one can be installed on a given host.
@@ -180,6 +181,7 @@ If that's empty, rostop will be empty too — fix discovery first.
 | `h` / `←`      | step **out**: pop one inspector level, or return focus to the topic table when already at the message root |
 | `f`            | from the topic table, open a **focus** view — a single-topic panel filling the whole terminal (bigger metrics, wider sparklines, full-width message tree). Press `f` again (or `Esc`) to return to the split-pane layout |
 | `w`            | open the selected topic's **waveform scope**. `Tab`/`Shift-Tab` selects numeric fields, `+`/`-` changes the time window, `0` resets it, and `a` locks/unlocks the Y axis |
+| `D`            | scan domains 0–10 plus the current domain and show domains with visible peer publishers; `D` or `Esc` closes/cancels the scan |
 | `s`            | cycle sort key (Name → Hz → BW → Type). Order auto-flips: Name/Type ascending, Hz/BW descending |
 | `p`            | pause / resume sample ingestion   |
 | `q` / `Ctrl-C` | quit                              |

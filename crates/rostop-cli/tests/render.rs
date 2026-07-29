@@ -6,6 +6,7 @@ use std::time::{Duration, Instant};
 use ratatui::backend::TestBackend;
 use ratatui::Terminal;
 use rostop_cli::backend::BackendEvent;
+use rostop_cli::domain::DomainProbeResult;
 use rostop_cli::test_support::{render_once, AppHandle};
 use rostop_core::message::DynamicValue;
 
@@ -244,6 +245,44 @@ fn waveform_scope_renders_live_numeric_signal_and_controls() {
         assert!(
             dump.contains(needle),
             "expected {needle:?} in waveform scope:\n{dump}"
+        );
+    }
+}
+
+#[test]
+fn domain_scan_modal_reports_visible_domains() {
+    let mut handle = AppHandle::demo();
+    handle.tick(Duration::from_millis(50));
+    handle.app.domain_scan_view.active = true;
+    handle.app.domain_scan_view.total = 11;
+    handle.app.domain_scan_view.started = 11;
+    handle.app.domain_scan_view.completed = 11;
+    handle.app.domain_scan_view.finished = true;
+    handle.app.domain_scan_view.visible.push(DomainProbeResult {
+        protocol_version: DomainProbeResult::PROTOCOL_VERSION,
+        domain_id: 7,
+        visible_topics: 42,
+        visible_nodes: 8,
+        discovery_ms: 812,
+    });
+
+    let backend = TestBackend::new(120, 32);
+    let mut terminal = Terminal::new(backend).unwrap();
+    render_once(&mut terminal, &mut handle);
+    let buf = terminal.backend().buffer().clone();
+    let dump = (0..buf.area.height)
+        .map(|y| {
+            (0..buf.area.width)
+                .map(|x| buf[(x, y)].symbol())
+                .collect::<String>()
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    for needle in ["visible ROS domains", "complete", "42", "812 ms", "D/Esc"] {
+        assert!(
+            dump.contains(needle),
+            "expected {needle:?} in domain modal:\n{dump}"
         );
     }
 }

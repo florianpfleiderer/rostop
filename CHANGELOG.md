@@ -53,6 +53,13 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- **Explicit ROS domain selection.** `rostop --domain <0-232>` overrides
+  `ROS_DOMAIN_ID`, validates the DDS protocol range before startup, and shows
+  the active domain in the topic-table title.
+- **On-demand visible-domain scan.** Press `D` in a live session to probe
+  domains 0–10 plus the current domain in isolated child processes. A modal
+  reports scan progress and visible topic/node counts; concurrency, discovery
+  time, process lifetime, and cancellation are all bounded.
 - **Waveform scope for numeric message fields.** Press `w` on a topic to open
   a full-terminal Braille line chart with live current/min/max/mean metrics,
   spike-preserving decimation, selectable nested numeric fields, 1–30 second

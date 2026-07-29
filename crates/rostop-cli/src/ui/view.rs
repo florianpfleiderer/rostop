@@ -2,8 +2,8 @@
 
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
-use ratatui::text::{Line, Span};
 use ratatui::symbols;
+use ratatui::text::{Line, Span};
 use ratatui::widgets::{
     Axis, Block, Borders, Cell, Chart, Dataset, GraphType, Paragraph, Row, Table,
 };
@@ -138,7 +138,10 @@ fn render_scope(f: &mut Frame, area: Rect, app: &App, row: &TopicTableRow) {
                 .add_modifier(Modifier::BOLD),
         )
         .title(Line::from(vec![
-            Span::styled(" waveform ", Style::default().fg(Color::Black).bg(Color::Cyan)),
+            Span::styled(
+                " waveform ",
+                Style::default().fg(Color::Black).bg(Color::Cyan),
+            ),
             Span::styled(row.name.clone(), Style::default().fg(Color::Yellow)),
             Span::raw(" ─ "),
             Span::styled(field.clone(), Style::default().fg(Color::LightCyan)),

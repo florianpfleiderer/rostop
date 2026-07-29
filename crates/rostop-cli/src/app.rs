@@ -370,7 +370,8 @@ impl App {
             return;
         }
         self.scope.selected_field = (self.scope.selected_field as i32 + delta)
-            .rem_euclid(self.scope.fields.len() as i32) as usize;
+            .rem_euclid(self.scope.fields.len() as i32)
+            as usize;
         self.scope.series.clear();
         self.scope.locked_y = None;
     }
@@ -381,8 +382,7 @@ impl App {
             .iter()
             .position(|seconds| *seconds == self.scope.window.as_secs())
             .unwrap_or(2);
-        let next = (current as i32 + direction)
-            .clamp(0, WINDOWS.len() as i32 - 1) as usize;
+        let next = (current as i32 + direction).clamp(0, WINDOWS.len() as i32 - 1) as usize;
         self.scope.window = Duration::from_secs(WINDOWS[next]);
         self.scope.locked_y = None;
     }

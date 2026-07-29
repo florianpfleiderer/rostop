@@ -157,16 +157,14 @@ impl TimeSeries {
         let bucket_size = visible.len().div_ceil(bucket_count.max(1));
         let mut points = Vec::with_capacity(bucket_count * 2);
         for bucket in visible.chunks(bucket_size) {
-            let min = bucket
-                .iter()
-                .min_by(|a, b| a.1.total_cmp(&b.1))
-                .copied();
-            let max = bucket
-                .iter()
-                .max_by(|a, b| a.1.total_cmp(&b.1))
-                .copied();
+            let min = bucket.iter().min_by(|a, b| a.1.total_cmp(&b.1)).copied();
+            let max = bucket.iter().max_by(|a, b| a.1.total_cmp(&b.1)).copied();
             if let (Some(min), Some(max)) = (min, max) {
-                let ordered = if min.0 <= max.0 { [min, max] } else { [max, min] };
+                let ordered = if min.0 <= max.0 {
+                    [min, max]
+                } else {
+                    [max, min]
+                };
                 for (at, value) in ordered {
                     points.push((signed_age_seconds(at, now), value));
                 }

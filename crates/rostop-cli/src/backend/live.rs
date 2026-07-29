@@ -31,6 +31,7 @@ use rostop_core::endpoint::{
 use rostop_core::message::DynamicValue;
 
 use crate::backend::{BackendEvent, RosBackend};
+use crate::domain::{resolve_domain, DomainId};
 
 const GRAPH_POLL_INTERVAL: Duration = Duration::from_millis(500);
 const SPIN_TICK: Duration = Duration::from_millis(50);
@@ -41,6 +42,7 @@ const MAX_SAMPLES_PER_POLL: usize = 1024;
 const SELF_NODE_NAME: &str = "rostop";
 
 pub struct LiveBackend {
+    domain_id: DomainId,
     control_rx: Receiver<BackendEvent>,
     sample_rx: Receiver<BackendEvent>,
     shutdown_tx: Sender<()>,
@@ -49,6 +51,12 @@ pub struct LiveBackend {
 
 impl LiveBackend {
     pub fn new() -> anyhow::Result<Self> {
+        let domain_id = resolve_domain(None, std::env::var("ROS_DOMAIN_ID").ok().as_deref())?;
+        Self::new_for_domain(domain_id)
+    }
+
+    pub fn new_for_domain(domain_id: DomainId) -> anyhow::Result<Self> {
+        std::env::set_var("ROS_DOMAIN_ID", domain_id.to_string());
         let (control_tx, control_rx) = mpsc::channel::<BackendEvent>();
         let (sample_tx, sample_rx) = mpsc::sync_channel::<BackendEvent>(SAMPLE_QUEUE_CAPACITY);
         let (shutdown_tx, shutdown_rx) = mpsc::channel::<()>();
@@ -63,6 +71,7 @@ impl LiveBackend {
 
         match init_rx.recv() {
             Ok(Ok(())) => Ok(Self {
+                domain_id,
                 control_rx,
                 sample_rx,
                 shutdown_tx,
@@ -116,6 +125,10 @@ impl RosBackend for LiveBackend {
 
     fn label(&self) -> &'static str {
         "live"
+    }
+
+    fn domain_id(&self) -> Option<DomainId> {
+        Some(self.domain_id)
     }
 }
 

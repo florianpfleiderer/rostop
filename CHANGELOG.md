@@ -53,6 +53,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- **Explicit ROS domain selection.** `rostop --domain <0-232>` overrides
+  `ROS_DOMAIN_ID`, validates the DDS protocol range before startup, and shows
+  the active domain in the topic-table title.
 - **Waveform scope for numeric message fields.** Press `w` on a topic to open
   a full-terminal Braille line chart with live current/min/max/mean metrics,
   spike-preserving decimation, selectable nested numeric fields, 1–30 second

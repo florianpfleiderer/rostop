@@ -88,7 +88,8 @@ install -m755 rostop-${VERSION}-${DISTRO}-x86_64/rostop ~/.local/bin/
 
 # Either way:
 source /opt/ros/${DISTRO}/setup.bash
-rostop
+rostop                  # uses ROS_DOMAIN_ID, or domain 0 when unset
+rostop --domain 7       # explicit override, shown in the title bar
 ```
 
 `rostop-humble` and `rostop-jazzy` both ship `/usr/bin/rostop` and declare a mutual `Conflicts:`, so only one can be installed on a given host.

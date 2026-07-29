@@ -6,6 +6,7 @@
 
 pub mod app;
 pub mod backend;
+pub mod domain;
 pub mod ui;
 
 pub mod test_support {

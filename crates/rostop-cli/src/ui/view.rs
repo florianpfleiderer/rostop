@@ -550,8 +550,12 @@ fn render_topic_table(f: &mut Frame, area: Rect, app: &mut App, rows: &[TopicTab
             .borders(Borders::ALL)
             .border_style(border_style(focused))
             .title(format!(
-                " rostop ─ {} ─ {} topics ",
+                " rostop ─ {}{} ─ {} topics ",
                 app.backend.label(),
+                app.backend
+                    .domain_id()
+                    .map(|domain| format!(" ─ domain {domain}"))
+                    .unwrap_or_default(),
                 rows.len()
             )),
     );

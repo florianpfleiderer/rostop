@@ -350,10 +350,7 @@ struct KnownTopic {
     cancel: Option<futures::channel::oneshot::Sender<()>>,
 }
 
-pub fn probe_domain(
-    domain_id: DomainId,
-    config: ProbeConfig,
-) -> anyhow::Result<DomainProbeResult> {
+pub fn probe_domain(domain_id: DomainId, config: ProbeConfig) -> anyhow::Result<DomainProbeResult> {
     std::env::set_var("ROS_DOMAIN_ID", domain_id.to_string());
     let context = r2r::Context::create().context("r2r probe context creation failed")?;
     let probe_name = format!("rostop_domain_probe_{}", std::process::id());

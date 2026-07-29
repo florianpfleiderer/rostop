@@ -33,10 +33,7 @@ fn main() -> Result<()> {
     if let Some(domain) = cli.probe_domain {
         return run_probe(domain, cli.probe_ms);
     }
-    let domain = resolve_domain(
-        cli.domain,
-        std::env::var("ROS_DOMAIN_ID").ok().as_deref(),
-    )?;
+    let domain = resolve_domain(cli.domain, std::env::var("ROS_DOMAIN_ID").ok().as_deref())?;
     let backend: Box<dyn RosBackend> = pick_backend(cli.demo, domain)?;
     let app = App::new(backend);
     run(app)

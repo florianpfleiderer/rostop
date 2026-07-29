@@ -6,9 +6,9 @@ use std::time::{Duration, Instant};
 use ratatui::backend::TestBackend;
 use ratatui::Terminal;
 use rostop_cli::backend::BackendEvent;
+use rostop_cli::domain::DomainProbeResult;
 use rostop_cli::test_support::{render_once, AppHandle};
 use rostop_core::message::DynamicValue;
-use rostop_cli::domain::DomainProbeResult;
 
 #[test]
 fn demo_backend_topics_render_after_a_few_ticks() {

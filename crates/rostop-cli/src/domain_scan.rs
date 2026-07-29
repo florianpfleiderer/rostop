@@ -53,7 +53,10 @@ impl DomainScan {
         let queue = Arc::new(Mutex::new(domains.into_iter().collect::<VecDeque<_>>()));
         let cancel = Arc::new(AtomicBool::new(false));
         let (updates_tx, updates) = mpsc::channel();
-        let worker_count = config.concurrency.max(1).min(queue.lock().unwrap().len().max(1));
+        let worker_count = config
+            .concurrency
+            .max(1)
+            .min(queue.lock().unwrap().len().max(1));
         let remaining = Arc::new(Mutex::new(worker_count));
         let mut workers = Vec::with_capacity(worker_count);
 

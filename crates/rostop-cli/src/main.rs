@@ -4,7 +4,9 @@ use clap::Parser;
 use rostop_cli::app::{run, App};
 use rostop_cli::backend::demo::DemoBackend;
 use rostop_cli::backend::RosBackend;
-use rostop_cli::domain::{resolve_domain, DomainId, ProbeConfig};
+use rostop_cli::domain::{resolve_domain, DomainId};
+#[cfg(feature = "live")]
+use rostop_cli::domain::ProbeConfig;
 
 /// Interactive TUI for inspecting and debugging ROS 2 topics.
 #[derive(Debug, Parser)]

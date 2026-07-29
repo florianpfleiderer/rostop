@@ -2,6 +2,7 @@
 
 use std::fmt;
 use std::str::FromStr;
+use std::time::Duration;
 
 pub const MAX_DOMAIN_ID: u16 = 232;
 
@@ -56,9 +57,43 @@ impl fmt::Display for DomainIdError {
 
 impl std::error::Error for DomainIdError {}
 
-pub fn resolve_domain(cli: Option<DomainId>, environment: Option<&str>) -> Result<DomainId, DomainIdError> {
+pub fn resolve_domain(
+    cli: Option<DomainId>,
+    environment: Option<&str>,
+) -> Result<DomainId, DomainIdError> {
     cli.map(Ok)
         .unwrap_or_else(|| environment.map(str::parse).unwrap_or(Ok(DomainId::DEFAULT)))
+}
+
+#[cfg_attr(feature = "live", derive(serde::Serialize, serde::Deserialize))]
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DomainProbeResult {
+    pub protocol_version: u8,
+    pub domain_id: u16,
+    pub visible_topics: usize,
+    pub visible_nodes: usize,
+    pub discovery_ms: u64,
+}
+
+impl DomainProbeResult {
+    pub const PROTOCOL_VERSION: u8 = 1;
+
+    pub fn is_visible(&self) -> bool {
+        self.visible_topics > 0 || self.visible_nodes > 0
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ProbeConfig {
+    pub discovery_window: Duration,
+}
+
+impl Default for ProbeConfig {
+    fn default() -> Self {
+        Self {
+            discovery_window: Duration::from_millis(800),
+        }
+    }
 }
 
 #[cfg(test)]
@@ -88,5 +123,22 @@ mod tests {
         );
         assert_eq!(resolve_domain(None, Some("42")).unwrap().get(), 42);
         assert_eq!(resolve_domain(None, None).unwrap().get(), 0);
+    }
+
+    #[test]
+    fn probe_visibility_requires_an_external_graph_signal() {
+        let empty = DomainProbeResult {
+            protocol_version: DomainProbeResult::PROTOCOL_VERSION,
+            domain_id: 7,
+            visible_topics: 0,
+            visible_nodes: 0,
+            discovery_ms: 800,
+        };
+        assert!(!empty.is_visible());
+        assert!(DomainProbeResult {
+            visible_nodes: 1,
+            ..empty
+        }
+        .is_visible());
     }
 }

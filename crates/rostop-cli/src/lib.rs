@@ -7,6 +7,8 @@
 pub mod app;
 pub mod backend;
 pub mod domain;
+#[cfg(feature = "live")]
+pub mod domain_scan;
 pub mod ui;
 
 pub mod test_support {

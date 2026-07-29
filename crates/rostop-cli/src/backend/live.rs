@@ -14,7 +14,7 @@
 //! mapped to [`DynamicValue`]. On decode failure (e.g. type-support not
 //! available) we fall back to `DynamicValue::Bytes(len)`.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::thread;
 use std::time::{Duration, Instant};
@@ -31,7 +31,7 @@ use rostop_core::endpoint::{
 use rostop_core::message::DynamicValue;
 
 use crate::backend::{BackendEvent, RosBackend};
-use crate::domain::{resolve_domain, DomainId};
+use crate::domain::{resolve_domain, DomainId, DomainProbeResult, ProbeConfig};
 
 const GRAPH_POLL_INTERVAL: Duration = Duration::from_millis(500);
 const SPIN_TICK: Duration = Duration::from_millis(50);
@@ -348,6 +348,48 @@ fn spin_loop(
 struct KnownTopic {
     type_name: String,
     cancel: Option<futures::channel::oneshot::Sender<()>>,
+}
+
+pub fn probe_domain(
+    domain_id: DomainId,
+    config: ProbeConfig,
+) -> anyhow::Result<DomainProbeResult> {
+    std::env::set_var("ROS_DOMAIN_ID", domain_id.to_string());
+    let context = r2r::Context::create().context("r2r probe context creation failed")?;
+    let probe_name = format!("rostop_domain_probe_{}", std::process::id());
+    let mut node =
+        r2r::Node::create(context, &probe_name, "").context("r2r probe node creation failed")?;
+    let started = Instant::now();
+    let mut visible_topics = HashSet::new();
+    let mut visible_nodes = HashSet::new();
+
+    while started.elapsed() < config.discovery_window {
+        node.spin_once(SPIN_TICK);
+        if let Ok(graph) = node.get_topic_names_and_types() {
+            for topic in graph.keys() {
+                let publishers = node
+                    .get_publishers_info_by_topic(topic, false)
+                    .unwrap_or_default();
+                for publisher in publishers {
+                    if publisher.node_name != probe_name {
+                        visible_topics.insert(topic.clone());
+                        visible_nodes.insert((
+                            publisher.node_namespace.clone(),
+                            publisher.node_name.clone(),
+                        ));
+                    }
+                }
+            }
+        }
+    }
+
+    Ok(DomainProbeResult {
+        protocol_version: DomainProbeResult::PROTOCOL_VERSION,
+        domain_id: domain_id.get(),
+        visible_topics: visible_topics.len(),
+        visible_nodes: visible_nodes.len(),
+        discovery_ms: started.elapsed().as_millis() as u64,
+    })
 }
 
 /// Decode one raw CDR sample into a `DynamicValue`.

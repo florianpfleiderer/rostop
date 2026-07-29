@@ -5,7 +5,7 @@ use ratatui::style::{Color, Modifier, Style};
 use ratatui::symbols;
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{
-    Axis, Block, Borders, Cell, Chart, Dataset, GraphType, Paragraph, Row, Table,
+    Axis, Block, Borders, Cell, Chart, Clear, Dataset, Gauge, GraphType, Paragraph, Row, Table,
 };
 use ratatui::Frame;
 use rostop_core::endpoint::{gid_hex_short, sort_endpoints, EndpointInfo, EndpointSets};
@@ -44,6 +44,9 @@ pub fn render(f: &mut Frame, app: &mut App, rows: &[TopicTableRow]) {
             .split(area);
         render_fullscreen_topic(f, chunks[0], app, rows);
         render_status_bar(f, chunks[1], app);
+        if app.domain_scan_view.active {
+            render_domain_scan(f, area, app);
+        }
         return;
     }
     let chunks = Layout::default()
@@ -57,6 +60,114 @@ pub fn render(f: &mut Frame, app: &mut App, rows: &[TopicTableRow]) {
     render_topic_table(f, chunks[0], app, rows);
     render_bottom(f, chunks[1], app, rows);
     render_status_bar(f, chunks[2], app);
+    if app.domain_scan_view.active {
+        render_domain_scan(f, area, app);
+    }
+}
+
+fn render_domain_scan(f: &mut Frame, area: Rect, app: &App) {
+    let width = area.width.saturating_sub(8).min(72);
+    let height = area.height.saturating_sub(6).min(22);
+    let modal = Rect::new(
+        area.x + area.width.saturating_sub(width) / 2,
+        area.y + area.height.saturating_sub(height) / 2,
+        width,
+        height,
+    );
+    f.render_widget(Clear, modal);
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(
+            Style::default()
+                .fg(Color::Yellow)
+                .add_modifier(Modifier::BOLD),
+        )
+        .title(" visible ROS domains ");
+    let inner = block.inner(modal);
+    f.render_widget(block, modal);
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(2),
+            Constraint::Length(1),
+            Constraint::Min(3),
+            Constraint::Length(2),
+        ])
+        .split(inner);
+
+    let ratio = if app.domain_scan_view.total == 0 {
+        0.0
+    } else {
+        app.domain_scan_view.completed as f64 / app.domain_scan_view.total as f64
+    };
+    let label = if app.domain_scan_view.finished {
+        format!(
+            "complete · {} visible · {} failed",
+            app.domain_scan_view.visible.len(),
+            app.domain_scan_view.failures.len()
+        )
+    } else {
+        format!(
+            "probing {} / {} · {} complete",
+            app.domain_scan_view.started,
+            app.domain_scan_view.total,
+            app.domain_scan_view.completed
+        )
+    };
+    f.render_widget(
+        Gauge::default()
+            .gauge_style(Style::default().fg(Color::Cyan))
+            .ratio(ratio.clamp(0.0, 1.0))
+            .label(label),
+        chunks[0],
+    );
+
+    f.render_widget(
+        Paragraph::new(" DOMAIN   TOPICS   NODES   DISCOVERY")
+            .style(Style::default().fg(Color::DarkGray)),
+        chunks[1],
+    );
+    let lines = if app.domain_scan_view.visible.is_empty() {
+        vec![Line::from(Span::styled(
+            if app.domain_scan_view.finished {
+                "  (no visible peer domains in the scanned range)"
+            } else {
+                "  waiting for DDS discovery…"
+            },
+            Style::default().fg(Color::DarkGray),
+        ))]
+    } else {
+        app.domain_scan_view
+            .visible
+            .iter()
+            .map(|result| {
+                Line::from(vec![
+                    Span::styled(
+                        format!(" {:>5}", result.domain_id),
+                        Style::default().fg(Color::Yellow),
+                    ),
+                    Span::styled(
+                        format!("   {:>6}", result.visible_topics),
+                        Style::default().fg(Color::Cyan),
+                    ),
+                    Span::styled(
+                        format!("   {:>5}", result.visible_nodes),
+                        Style::default().fg(Color::Green),
+                    ),
+                    Span::styled(
+                        format!("   {:>6} ms", result.discovery_ms),
+                        Style::default().fg(Color::DarkGray),
+                    ),
+                ])
+            })
+            .collect()
+    };
+    f.render_widget(Paragraph::new(lines), chunks[2]);
+    f.render_widget(
+        Paragraph::new("Scans domains 0–10 plus the current domain · D/Esc: close")
+            .style(Style::default().fg(Color::DarkGray)),
+        chunks[3],
+    );
 }
 
 fn render_fullscreen_topic(f: &mut Frame, area: Rect, app: &App, rows: &[TopicTableRow]) {
@@ -773,7 +884,9 @@ fn render_status_bar(f: &mut Frame, area: Rect, app: &App) {
         "j/k:move  l/Enter:drill-in  h:drill-out  w:waveform  f/Esc:back  q:quit"
     } else {
         match app.focus {
-            Focus::Topics => "j/k:move  l:inspect  f:focus  w:waveform  s:sort  p:pause  q:quit",
+            Focus::Topics => {
+                "j/k:move  l:inspect  f:focus  w:waveform  D:domains  s:sort  p:pause  q:quit"
+            }
             Focus::Inspector => "j/k:move  l:drill-in  h:drill-out/back  p:pause  q:quit",
         }
     };

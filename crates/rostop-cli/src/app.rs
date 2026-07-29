@@ -220,6 +220,23 @@ impl App {
                     publishers,
                     subscribers,
                 } => {
+                    let publisher_count = publishers
+                        .as_ref()
+                        .map(|items| items.len() as u32);
+                    let subscriber_count = subscribers
+                        .as_ref()
+                        .map(|items| items.len() as u32);
+                    if let Some((current_publishers, current_subscribers)) = self
+                        .registry
+                        .get(&topic)
+                        .map(|entry| (entry.publishers, entry.subscribers))
+                    {
+                        self.registry.set_endpoints(
+                            &topic,
+                            publisher_count.unwrap_or(current_publishers),
+                            subscriber_count.unwrap_or(current_subscribers),
+                        );
+                    }
                     self.endpoints.insert(topic, (publishers, subscribers));
                 }
                 BackendEvent::DecodeFailure { .. } => {
@@ -490,6 +507,45 @@ mod tests {
             type_name: "sensor_msgs/msg/LaserScan".into(),
         }]);
         assert_eq!(app.notice.as_deref(), Some(first.as_str()));
+    }
+
+    #[test]
+    fn endpoint_refresh_updates_topic_counts() {
+        let backend: Box<dyn RosBackend> = Box::new(DemoBackend::new());
+        let mut app = App::new(backend);
+        app.ingest_for_tests(vec![empty_topic_event("/parameter_events")]);
+
+        app.ingest_for_tests(vec![BackendEvent::Endpoints {
+            topic: "/parameter_events".into(),
+            publishers: Some(Vec::new()),
+            subscribers: Some(Vec::new()),
+        }]);
+
+        let entry = app.registry.get("/parameter_events").unwrap();
+        assert_eq!(entry.publishers, 0);
+        assert_eq!(entry.subscribers, 0);
+    }
+
+    #[test]
+    fn unavailable_endpoint_side_preserves_previous_count() {
+        let backend: Box<dyn RosBackend> = Box::new(DemoBackend::new());
+        let mut app = App::new(backend);
+        app.ingest_for_tests(vec![BackendEvent::Topic {
+            name: "/parameter_events".into(),
+            type_name: "std_msgs/msg/Empty".into(),
+            publishers: 3,
+            subscribers: 2,
+        }]);
+
+        app.ingest_for_tests(vec![BackendEvent::Endpoints {
+            topic: "/parameter_events".into(),
+            publishers: Some(Vec::new()),
+            subscribers: None,
+        }]);
+
+        let entry = app.registry.get("/parameter_events").unwrap();
+        assert_eq!(entry.publishers, 0);
+        assert_eq!(entry.subscribers, 2);
     }
 
     #[test]

@@ -22,7 +22,7 @@ use std::time::{Duration, Instant};
 use anyhow::Context as _;
 use futures::executor::LocalPool;
 use futures::task::LocalSpawnExt;
-use futures::StreamExt;
+use futures::{FutureExt, StreamExt};
 
 use rostop_core::endpoint::{
     normalise_duration, DurabilityKind, EndpointInfo, HistoryKind, LivelinessKind, QosSnapshot,
@@ -34,32 +34,37 @@ use crate::backend::{BackendEvent, RosBackend};
 
 const GRAPH_POLL_INTERVAL: Duration = Duration::from_millis(500);
 const SPIN_TICK: Duration = Duration::from_millis(50);
+const SAMPLE_QUEUE_CAPACITY: usize = 4096;
+const MAX_SAMPLES_PER_POLL: usize = 1024;
 
 /// rostop's own ROS node name.
 const SELF_NODE_NAME: &str = "rostop";
 
 pub struct LiveBackend {
-    rx: Receiver<BackendEvent>,
+    control_rx: Receiver<BackendEvent>,
+    sample_rx: Receiver<BackendEvent>,
     shutdown_tx: Sender<()>,
     spin_thread: Option<thread::JoinHandle<()>>,
 }
 
 impl LiveBackend {
     pub fn new() -> anyhow::Result<Self> {
-        let (event_tx, event_rx) = mpsc::channel::<BackendEvent>();
+        let (control_tx, control_rx) = mpsc::channel::<BackendEvent>();
+        let (sample_tx, sample_rx) = mpsc::sync_channel::<BackendEvent>(SAMPLE_QUEUE_CAPACITY);
         let (shutdown_tx, shutdown_rx) = mpsc::channel::<()>();
         let (init_tx, init_rx) = mpsc::sync_channel::<anyhow::Result<()>>(1);
 
         let spin_thread = thread::Builder::new()
             .name("rostop-live-spin".into())
             .spawn(move || {
-                spin_loop(event_tx, shutdown_rx, init_tx);
+                spin_loop(control_tx, sample_tx, shutdown_rx, init_tx);
             })
             .context("failed to spawn rostop-live-spin thread")?;
 
         match init_rx.recv() {
             Ok(Ok(())) => Ok(Self {
-                rx: event_rx,
+                control_rx,
+                sample_rx,
                 shutdown_tx,
                 spin_thread: Some(spin_thread),
             }),
@@ -86,18 +91,24 @@ impl Drop for LiveBackend {
 impl RosBackend for LiveBackend {
     fn poll(&mut self, budget: Duration) -> Vec<BackendEvent> {
         let mut out = Vec::new();
-        // Drain everything currently buffered.
-        while let Ok(ev) = self.rx.try_recv() {
+        // Control-plane graph events are low-volume and must never be dropped.
+        while let Ok(ev) = self.control_rx.try_recv() {
             out.push(ev);
         }
-        // If nothing was buffered, wait up to `budget` for the first event,
-        // then drain the rest non-blockingly.
-        if out.is_empty() {
-            if let Ok(ev) = self.rx.recv_timeout(budget) {
+
+        // Sample traffic can exceed the UI's render rate. Its channel is
+        // bounded and each poll has a drain budget so a firehose cannot grow
+        // memory without bound or starve terminal input/rendering.
+        for _ in 0..MAX_SAMPLES_PER_POLL {
+            match self.sample_rx.try_recv() {
+                Ok(ev) => out.push(ev),
+                Err(_) => break,
+            }
+        }
+
+        if out.is_empty() && !budget.is_zero() {
+            if let Ok(ev) = self.control_rx.recv_timeout(budget) {
                 out.push(ev);
-                while let Ok(ev) = self.rx.try_recv() {
-                    out.push(ev);
-                }
             }
         }
         out
@@ -109,7 +120,8 @@ impl RosBackend for LiveBackend {
 }
 
 fn spin_loop(
-    event_tx: Sender<BackendEvent>,
+    control_tx: Sender<BackendEvent>,
+    sample_tx: mpsc::SyncSender<BackendEvent>,
     shutdown_rx: Receiver<()>,
     init_tx: mpsc::SyncSender<anyhow::Result<()>>,
 ) {
@@ -131,7 +143,7 @@ fn spin_loop(
 
     let mut pool = LocalPool::new();
     let spawner = pool.spawner();
-    let mut known: HashMap<String, String> = HashMap::new();
+    let mut known: HashMap<String, KnownTopic> = HashMap::new();
     let mut last_poll = Instant::now()
         .checked_sub(GRAPH_POLL_INTERVAL)
         .unwrap_or_else(Instant::now);
@@ -196,25 +208,36 @@ fn spin_loop(
                     let subs_info = node
                         .get_subscriptions_info_by_topic(name, false)
                         .unwrap_or_default();
+                    let subscribers = subs_info.len() as u32;
                     let subscriber_infos: Vec<EndpointInfo> =
                         subs_info.into_iter().map(map_endpoint).collect();
 
-                    let _ = event_tx.send(BackendEvent::Endpoints {
+                    let _ = control_tx.send(BackendEvent::Endpoints {
                         topic: name.clone(),
                         publishers: Some(publisher_infos),
                         subscribers: Some(subscriber_infos),
                     });
 
-                    if known.contains_key(name) {
+                    if known
+                        .get(name)
+                        .is_some_and(|known_topic| known_topic.type_name == *ty)
+                    {
                         continue;
                     }
-                    let _ = event_tx.send(BackendEvent::Topic {
+
+                    if let Some(previous) = known.remove(name) {
+                        if let Some(cancel) = previous.cancel {
+                            let _ = cancel.send(());
+                        }
+                        let _ = control_tx.send(BackendEvent::TopicRemoved(name.clone()));
+                    }
+
+                    let _ = control_tx.send(BackendEvent::Topic {
                         name: name.clone(),
                         type_name: ty.clone(),
                         publishers,
-                        subscribers: 0,
+                        subscribers,
                     });
-                    known.insert(name.clone(), ty.clone());
 
                     // Per-topic sample forwarder. subscribe_raw for accurate
                     // wire-byte counts; decode via WrappedNativeMsgUntyped.
@@ -231,37 +254,60 @@ fn spin_loop(
                         derive_compatible_qos(&publisher_qos)
                     };
                     if let Ok(stream) = node.subscribe_raw(name, ty, sub_qos) {
+                        let (cancel_tx, cancel_rx) = futures::channel::oneshot::channel();
+                        known.insert(
+                            name.clone(),
+                            KnownTopic {
+                                type_name: ty.clone(),
+                                cancel: Some(cancel_tx),
+                            },
+                        );
                         let name_owned = name.clone();
                         let ty_owned = ty.clone();
-                        let tx = event_tx.clone();
+                        let control_tx = control_tx.clone();
+                        let sample_tx = sample_tx.clone();
                         let _ = spawner.spawn_local(async move {
-                            let mut stream = stream;
+                            let mut stream = stream.fuse();
+                            let mut cancel_rx = cancel_rx.fuse();
                             let mut decoder =
                                 r2r::WrappedNativeMsgUntyped::new_from(&ty_owned).ok();
                             let mut emitted_decode_failure = false;
-                            while let Some(bytes) = stream.next().await {
+                            loop {
+                                let bytes = futures::select! {
+                                    sample = stream.next() => match sample {
+                                        Some(bytes) => bytes,
+                                        None => break,
+                                    },
+                                    _ = cancel_rx => break,
+                                };
                                 let (value, decode_failed) =
                                     decode_sample(decoder.as_mut(), &bytes);
                                 if decode_failed && !emitted_decode_failure {
                                     emitted_decode_failure = true;
-                                    let _ = tx.send(BackendEvent::DecodeFailure {
+                                    let _ = control_tx.send(BackendEvent::DecodeFailure {
                                         topic: name_owned.clone(),
                                         type_name: ty_owned.clone(),
                                     });
                                 }
-                                if tx
-                                    .send(BackendEvent::Sample {
-                                        name: name_owned.clone(),
-                                        bytes: bytes.len() as u32,
-                                        value,
-                                        at: Instant::now(),
-                                    })
-                                    .is_err()
-                                {
-                                    break;
+                                match sample_tx.try_send(BackendEvent::Sample {
+                                    name: name_owned.clone(),
+                                    bytes: bytes.len() as u32,
+                                    value,
+                                    at: Instant::now(),
+                                }) {
+                                    Ok(()) | Err(mpsc::TrySendError::Full(_)) => {}
+                                    Err(mpsc::TrySendError::Disconnected(_)) => break,
                                 }
                             }
                         });
+                    } else {
+                        known.insert(
+                            name.clone(),
+                            KnownTopic {
+                                type_name: ty.clone(),
+                                cancel: None,
+                            },
+                        );
                     }
                 }
 
@@ -271,8 +317,12 @@ fn spin_loop(
                     .cloned()
                     .collect();
                 for name in gone {
-                    known.remove(&name);
-                    let _ = event_tx.send(BackendEvent::TopicRemoved(name));
+                    if let Some(previous) = known.remove(&name) {
+                        if let Some(cancel) = previous.cancel {
+                            let _ = cancel.send(());
+                        }
+                    }
+                    let _ = control_tx.send(BackendEvent::TopicRemoved(name));
                 }
             }
         }
@@ -280,6 +330,11 @@ fn spin_loop(
         node.spin_once(SPIN_TICK);
         pool.run_until_stalled();
     }
+}
+
+struct KnownTopic {
+    type_name: String,
+    cancel: Option<futures::channel::oneshot::Sender<()>>,
 }
 
 /// Decode one raw CDR sample into a `DynamicValue`.

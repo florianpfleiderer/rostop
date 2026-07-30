@@ -10,6 +10,7 @@ use ratatui::widgets::{
 use ratatui::Frame;
 use rostop_core::endpoint::{gid_hex_short, sort_endpoints, EndpointInfo, EndpointSets};
 use rostop_core::message::{level_rows, path_segments};
+use rostop_core::node_graph::{GraphNode, GraphSide, SelectedTopicGraph};
 use rostop_core::registry::SortOrder;
 
 use crate::app::{padded_bounds, App, Focus};
@@ -21,6 +22,7 @@ use crate::ui::rows::{fmt_bps, TopicTableRow};
 /// topic (≈1 Hz) so we don't flicker on transients but short enough to
 /// reassure the user within a few render frames.
 const IDLE_THRESHOLD_SECS: u64 = 3;
+const GRAPH_ACTIVITY_NS: u64 = 900_000_000;
 
 /// Build the placeholder line shown inside the inspector when the selected
 /// topic has no buffered message. Below `IDLE_THRESHOLD_SECS` we keep the
@@ -37,6 +39,15 @@ fn inspector_empty_state(idle_secs: u64, publishers: u32, subscribers: u32) -> S
 
 pub fn render(f: &mut Frame, app: &mut App, rows: &[TopicTableRow]) {
     let area = f.area();
+    if app.node_graph_active {
+        let chunks = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([Constraint::Min(8), Constraint::Length(1)])
+            .split(area);
+        render_node_graph(f, chunks[0], app, rows);
+        render_status_bar(f, chunks[1], app);
+        return;
+    }
     if app.fullscreen {
         let chunks = Layout::default()
             .direction(Direction::Vertical)
@@ -63,6 +74,337 @@ pub fn render(f: &mut Frame, app: &mut App, rows: &[TopicTableRow]) {
     if app.domain_scan_view.active {
         render_domain_scan(f, area, app);
     }
+}
+
+fn render_node_graph(f: &mut Frame, area: Rect, app: &App, rows: &[TopicTableRow]) {
+    let topic = app.node_graph_topic.as_deref().unwrap_or("(no topic)");
+    let Some(row) = rows.iter().find(|row| row.name == topic) else {
+        f.render_widget(
+            Paragraph::new(vec![
+                Line::from(""),
+                Line::from(Span::styled(
+                    format!("  {topic} disappeared from the live graph"),
+                    Style::default()
+                        .fg(Color::Yellow)
+                        .add_modifier(Modifier::BOLD),
+                )),
+                Line::from(""),
+                Line::from("  Press g or Esc to return"),
+            ])
+            .block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .border_style(Style::default().fg(Color::Yellow))
+                    .title(" node graph ─ topic unavailable "),
+            ),
+            area,
+        );
+        return;
+    };
+
+    let topology = SelectedTopicGraph::from_endpoints(app.endpoints.get(topic));
+    let activity = app.topic_activity.get(topic).copied().unwrap_or_default();
+    let elapsed_ns = app.elapsed_ns();
+    let active = activity.last_sample_ns > 0
+        && elapsed_ns.saturating_sub(activity.last_sample_ns) <= GRAPH_ACTIVITY_NS;
+    let phase = ((elapsed_ns / 80_000_000) + activity.sequence) as usize;
+    let status = if active { "TRAFFIC" } else { "IDLE" };
+    let status_style = if active {
+        Style::default()
+            .fg(Color::Black)
+            .bg(Color::LightGreen)
+            .add_modifier(Modifier::BOLD)
+    } else {
+        Style::default().fg(Color::DarkGray)
+    };
+
+    let outer = Block::default()
+        .borders(Borders::ALL)
+        .border_style(
+            Style::default()
+                .fg(if active {
+                    Color::LightGreen
+                } else {
+                    Color::Cyan
+                })
+                .add_modifier(Modifier::BOLD),
+        )
+        .title(Line::from(vec![
+            Span::styled(
+                " NODE GRAPH ",
+                Style::default()
+                    .fg(Color::Black)
+                    .bg(Color::Cyan)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(format!(" {topic} "), Style::default().fg(Color::Yellow)),
+            Span::raw(" "),
+            Span::styled(format!(" {status} "), status_style),
+        ]));
+    let inner = outer.inner(area);
+    f.render_widget(outer, area);
+
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(3),
+            Constraint::Min(5),
+            Constraint::Length(2),
+        ])
+        .split(inner);
+
+    let publisher_count = side_count(&topology.publishers);
+    let subscriber_count = side_count(&topology.subscribers);
+    f.render_widget(
+        Paragraph::new(vec![
+            Line::from(vec![
+                Span::styled(
+                    format!(" {publisher_count} publishing nodes "),
+                    Style::default().fg(Color::LightBlue),
+                ),
+                Span::styled("  ───────▶  ", flow_style(active)),
+                Span::styled(topic.to_string(), Style::default().fg(Color::Yellow)),
+                Span::styled("  ───────▶  ", flow_style(active)),
+                Span::styled(
+                    format!("{subscriber_count} subscribing nodes"),
+                    Style::default().fg(Color::LightMagenta),
+                ),
+            ]),
+            Line::from(Span::styled(
+                format!(" {}  ·  {}", row.type_name, traffic_copy(active)),
+                Style::default().fg(Color::DarkGray),
+            )),
+        ]),
+        chunks[0],
+    );
+
+    render_topology_body(
+        f,
+        chunks[1],
+        &topology.publishers,
+        topic,
+        &topology.subscribers,
+        active,
+        phase,
+    );
+    f.render_widget(
+        Paragraph::new(Line::from(vec![
+            Span::styled(
+                " Activity is topic-level: candidate paths pulse together",
+                Style::default().fg(Color::DarkGray),
+            ),
+            Span::raw("  ·  "),
+            Span::styled(
+                "f: endpoint QoS  w: waveform",
+                Style::default().fg(Color::Cyan),
+            ),
+        ]))
+        .block(Block::default().borders(Borders::TOP)),
+        chunks[2],
+    );
+}
+
+fn render_topology_body(
+    f: &mut Frame,
+    area: Rect,
+    publishers: &GraphSide,
+    topic: &str,
+    subscribers: &GraphSide,
+    active: bool,
+    phase: usize,
+) {
+    let widths = graph_column_widths(area.width);
+    let max_rows = area.height.saturating_sub(3).max(1) as usize;
+    let publisher_labels = graph_side_labels(publishers, max_rows, "no publishers");
+    let subscriber_labels = graph_side_labels(subscribers, max_rows, "no subscribers");
+    let rows = publisher_labels
+        .len()
+        .max(subscriber_labels.len())
+        .max(3)
+        .min(max_rows.max(3));
+    let center = rows / 2;
+    let mut lines = Vec::with_capacity(rows + 2);
+    lines.push(Line::from(vec![
+        graph_heading(" PUBLISHERS", widths[0], Color::LightBlue),
+        graph_heading(" FLOW", widths[1], Color::DarkGray),
+        graph_heading(" TOPIC", widths[2], Color::Yellow),
+        graph_heading(" FLOW", widths[3], Color::DarkGray),
+        graph_heading(" SUBSCRIBERS", widths[4], Color::LightMagenta),
+    ]));
+    lines.push(Line::from(""));
+
+    for index in 0..rows {
+        let publisher = centered_side_label(&publisher_labels, index, rows);
+        let subscriber = centered_side_label(&subscriber_labels, index, rows);
+        let center_text = match index.cmp(&center) {
+            std::cmp::Ordering::Less if index + 1 == center => centered("┌ TOPIC ┐", widths[2]),
+            std::cmp::Ordering::Equal => centered(topic, widths[2]),
+            std::cmp::Ordering::Greater if index == center + 1 => centered("└───────┘", widths[2]),
+            _ => centered("│", widths[2]),
+        };
+        lines.push(Line::from(vec![
+            Span::styled(
+                padded(publisher, widths[0], false),
+                Style::default().fg(Color::LightBlue),
+            ),
+            Span::styled(
+                edge(widths[1], !publisher.is_empty(), active, phase + index),
+                flow_style(active && !publisher.is_empty()),
+            ),
+            Span::styled(
+                center_text,
+                if index == center {
+                    Style::default()
+                        .fg(Color::Black)
+                        .bg(Color::Yellow)
+                        .add_modifier(Modifier::BOLD)
+                } else {
+                    Style::default().fg(Color::Yellow)
+                },
+            ),
+            Span::styled(
+                edge(widths[3], !subscriber.is_empty(), active, phase + index + 3),
+                flow_style(active && !subscriber.is_empty()),
+            ),
+            Span::styled(
+                padded(subscriber, widths[4], true),
+                Style::default().fg(Color::LightMagenta),
+            ),
+        ]));
+    }
+    f.render_widget(Paragraph::new(lines), area);
+}
+
+fn centered_side_label(labels: &[String], index: usize, rows: usize) -> &str {
+    let offset = rows.saturating_sub(labels.len()) / 2;
+    index
+        .checked_sub(offset)
+        .and_then(|label_index| labels.get(label_index))
+        .map(String::as_str)
+        .unwrap_or("")
+}
+
+fn graph_column_widths(width: u16) -> [usize; 5] {
+    let width = width as usize;
+    let edge = (width / 9).max(4);
+    let topic = (width / 5).max(12);
+    let remaining = width.saturating_sub(edge * 2 + topic);
+    let left = remaining / 2;
+    [left, edge, topic, edge, remaining.saturating_sub(left)]
+}
+
+fn graph_side_labels(side: &GraphSide, max_rows: usize, empty: &str) -> Vec<String> {
+    match side {
+        GraphSide::Unavailable => vec!["(not available)".into()],
+        GraphSide::Known(nodes) if nodes.is_empty() => vec![format!("({empty})")],
+        GraphSide::Known(nodes) => bounded_node_labels(nodes, max_rows),
+    }
+}
+
+fn bounded_node_labels(nodes: &[GraphNode], max_rows: usize) -> Vec<String> {
+    let overflow = nodes.len() > max_rows;
+    let visible = if overflow {
+        max_rows.saturating_sub(1)
+    } else {
+        max_rows
+    };
+    let mut labels: Vec<_> = nodes
+        .iter()
+        .take(visible)
+        .map(|node| {
+            let suffix = if node.endpoint_count > 1 {
+                format!(" ×{}", node.endpoint_count)
+            } else {
+                String::new()
+            };
+            format!("● {}{suffix}", node.fully_qualified_name())
+        })
+        .collect();
+    if overflow {
+        labels.push(format!("  +{} more", nodes.len() - visible));
+    }
+    labels
+}
+
+fn side_count(side: &GraphSide) -> String {
+    match side.nodes() {
+        Some(nodes) => nodes.len().to_string(),
+        None => "?".into(),
+    }
+}
+
+fn traffic_copy(active: bool) -> &'static str {
+    if active {
+        "samples flowing now"
+    } else {
+        "topology live, topic currently idle"
+    }
+}
+
+fn flow_style(active: bool) -> Style {
+    if active {
+        Style::default()
+            .fg(Color::LightGreen)
+            .add_modifier(Modifier::BOLD)
+    } else {
+        Style::default().fg(Color::DarkGray)
+    }
+}
+
+fn edge(width: usize, present: bool, active: bool, phase: usize) -> String {
+    if width == 0 || !present {
+        return " ".repeat(width);
+    }
+    let mut chars = vec!['─'; width];
+    if width > 1 {
+        chars[width - 1] = '▶';
+    }
+    if active && width > 2 {
+        chars[phase % (width - 1)] = '◆';
+    }
+    chars.into_iter().collect()
+}
+
+fn graph_heading(label: &str, width: usize, color: Color) -> Span<'static> {
+    Span::styled(
+        padded(label, width, true),
+        Style::default().fg(color).add_modifier(Modifier::BOLD),
+    )
+}
+
+fn centered(value: &str, width: usize) -> String {
+    let value = truncate(value, width);
+    let left = width.saturating_sub(value.chars().count()) / 2;
+    format!(
+        "{}{}{}",
+        " ".repeat(left),
+        value,
+        " ".repeat(width.saturating_sub(left + value.chars().count()))
+    )
+}
+
+fn padded(value: &str, width: usize, right_align: bool) -> String {
+    let value = truncate(value, width);
+    let pad = width.saturating_sub(value.chars().count());
+    if right_align {
+        format!("{}{}", " ".repeat(pad), value)
+    } else {
+        format!("{}{}", value, " ".repeat(pad))
+    }
+}
+
+fn truncate(value: &str, width: usize) -> String {
+    if value.chars().count() <= width {
+        return value.to_string();
+    }
+    if width <= 1 {
+        return "…".chars().take(width).collect();
+    }
+    value
+        .chars()
+        .take(width - 1)
+        .chain(std::iter::once('…'))
+        .collect()
 }
 
 fn render_domain_scan(f: &mut Frame, area: Rect, app: &App) {
@@ -860,7 +1202,9 @@ fn render_sparklines(f: &mut Frame, area: Rect, app: &App, rows: &[TopicTableRow
 }
 
 fn render_status_bar(f: &mut Frame, area: Rect, app: &App) {
-    let mode = if app.scope.active {
+    let mode = if app.node_graph_active {
+        "[GRAPH]".to_string()
+    } else if app.scope.active {
         "[SCOPE]".to_string()
     } else if app.fullscreen {
         "[FOCUS]".to_string()
@@ -878,14 +1222,16 @@ fn render_status_bar(f: &mut Frame, area: Rect, app: &App) {
         SortOrder::Descending => "▼",
     };
     let sort = format!("sort:{:?}{arrow}", app.sort_key);
-    let help = if app.scope.active {
+    let help = if app.node_graph_active {
+        "p:pause  g/Esc:back  q:quit"
+    } else if app.scope.active {
         "Tab:field  +/-:window  0:reset  a:auto/lock  p:pause  w/Esc:back  q:quit"
     } else if app.fullscreen {
-        "j/k:move  l/Enter:drill-in  h:drill-out  w:waveform  f/Esc:back  q:quit"
+        "j/k:move  l/Enter:drill-in  h:drill-out  g:graph  w:waveform  f/Esc:back  q:quit"
     } else {
         match app.focus {
             Focus::Topics => {
-                "j/k:move  l:inspect  f:focus  w:waveform  D:domains  s:sort  p:pause  q:quit"
+                "j/k:move  l:inspect  f:focus  g:graph  w:waveform  D:domains  s:sort  p:pause  q:quit"
             }
             Focus::Inspector => "j/k:move  l:drill-in  h:drill-out/back  p:pause  q:quit",
         }

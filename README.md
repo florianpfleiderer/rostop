@@ -180,6 +180,7 @@ If that's empty, rostop will be empty too — fix discovery first.
 | `l` / `→`      | step **into** the selected item: from the topic table moves focus to the inspector; from the inspector descends into the selected struct/array field |
 | `h` / `←`      | step **out**: pop one inspector level, or return focus to the topic table when already at the message root |
 | `f`            | from the topic table, open a **focus** view — a single-topic panel filling the whole terminal (bigger metrics, wider sparklines, full-width message tree). Press `f` again (or `Esc`) to return to the split-pane layout |
+| `g`            | open the selected topic's live **node graph**: publishing nodes → topic → subscribing nodes. Recent topic traffic animates candidate paths; `g` or `Esc` returns |
 | `w`            | open the selected topic's **waveform scope**. `Tab`/`Shift-Tab` selects numeric fields, `+`/`-` changes the time window, `0` resets it, and `a` locks/unlocks the Y axis |
 | `D`            | scan domains 0–10 plus the current domain and show domains with visible peer publishers; `D` or `Esc` closes/cancels the scan |
 | `s`            | cycle sort key (Name → Hz → BW → Type). Order auto-flips: Name/Type ascending, Hz/BW descending |
@@ -239,12 +240,12 @@ Shipped:
 - [x] **Message inspector** — dynamic field-tree decoding, no `.msg` codegen required; large arrays elided so `Image` / `PointCloud2` stay responsive.
 - [x] **Humble + Jazzy support** — per-distro Dockerfiles, mirrored `just` recipes, no default distro.
 - [x] **Release artifacts** — `.deb` and `.tar.gz` for each distro published on every `v*` tag, CI-gated.
+- [x] **Node-graph mini-map** — live selected-topic publisher→topic→subscriber topology with endpoint deduplication, bounded overflow, and animated topic traffic.
 
 Planned:
 
 - [ ] **Recording / replay** — `:rec <topic>` writes a small `.mcap` from selected topics.
 - [ ] **Service caller & param editor** panes (`F2` / `F3`).
-- [ ] **Node-graph mini-map** showing the live pub→sub graph for the selected topic, inspired by `rqt_graph` but live and animated.
 - [ ] **`htop`-style colour theme + config file** (`~/.config/rostop/config.toml`).
 
 ## License

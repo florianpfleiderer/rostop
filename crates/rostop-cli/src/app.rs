@@ -71,6 +71,12 @@ impl ScopeState {
     }
 }
 
+#[derive(Debug, Clone, Copy, Default)]
+pub struct TopicActivity {
+    pub last_sample_ns: u64,
+    pub sequence: u64,
+}
+
 pub struct App {
     pub backend: Box<dyn RosBackend>,
     pub registry: TopicRegistry,
@@ -115,6 +121,13 @@ pub struct App {
     /// (rendered as "(not available)"). Replaced wholesale on every
     /// `BackendEvent::Endpoints`; cleared when a topic disappears.
     pub endpoints: HashMap<String, EndpointSets>,
+    /// Full-screen publisher → topic → subscriber mini-map for the selected topic.
+    pub node_graph_active: bool,
+    /// Topic captured on entry so graph churn cannot silently retarget the view.
+    pub node_graph_topic: Option<String>,
+    /// Last observed sample per topic, used to animate graph edges without
+    /// claiming which individual publisher produced a sample.
+    pub topic_activity: HashMap<String, TopicActivity>,
     /// Waveform scope state for the selected topic in focus mode.
     pub scope: ScopeState,
     pub domain_scan_view: DomainScanView,
@@ -156,6 +169,9 @@ impl App {
             topic_table_state: TableState::default(),
             fullscreen: false,
             endpoints: HashMap::new(),
+            node_graph_active: false,
+            node_graph_topic: None,
+            topic_activity: HashMap::new(),
             scope: ScopeState::new(),
             domain_scan_view: DomainScanView::default(),
             #[cfg(feature = "live")]
@@ -260,6 +276,7 @@ impl App {
                     self.hz_sparks.remove(&name);
                     self.bw_sparks.remove(&name);
                     self.endpoints.remove(&name);
+                    self.topic_activity.remove(&name);
                     if self.scope.topic.as_deref() == Some(name.as_str()) {
                         self.scope.active = false;
                         self.scope.topic = None;
@@ -275,6 +292,9 @@ impl App {
                 } => {
                     self.registry.record(&name, elapsed_ns, bytes);
                     self.capture_scope_sample(&name, &value, at);
+                    let activity = self.topic_activity.entry(name.clone()).or_default();
+                    activity.last_sample_ns = elapsed_ns;
+                    activity.sequence = activity.sequence.wrapping_add(1);
                     self.last_message.insert(name, value);
                 }
                 BackendEvent::Endpoints {
@@ -380,6 +400,16 @@ impl App {
 
     pub fn leave_scope(&mut self) {
         self.scope.active = false;
+    }
+
+    pub fn enter_node_graph(&mut self, topic: &str) {
+        self.node_graph_active = true;
+        self.node_graph_topic = Some(topic.to_string());
+    }
+
+    pub fn leave_node_graph(&mut self) {
+        self.node_graph_active = false;
+        self.node_graph_topic = None;
     }
 
     pub fn cycle_scope_field(&mut self, delta: i32) {
@@ -571,6 +601,29 @@ fn event_loop(terminal: &mut Terminal<CrosstermBackend<Stdout>>, app: &mut App) 
                     }
                     continue;
                 }
+                if app.node_graph_active {
+                    match (key.code, key.modifiers) {
+                        (KeyCode::Char('q'), _) => break,
+                        (KeyCode::Char('c'), KeyModifiers::CONTROL) => break,
+                        (KeyCode::Esc, _) | (KeyCode::Char('g'), _) => {
+                            app.leave_node_graph();
+                        }
+                        (KeyCode::Char('f'), _) => {
+                            app.leave_node_graph();
+                            app.fullscreen = true;
+                        }
+                        (KeyCode::Char('w'), _) => {
+                            if let Some(topic) = app.node_graph_topic.clone() {
+                                app.leave_node_graph();
+                                app.fullscreen = true;
+                                app.enter_scope(&topic);
+                            }
+                        }
+                        (KeyCode::Char('p'), _) => app.paused = !app.paused,
+                        _ => {}
+                    }
+                    continue;
+                }
                 if app.fullscreen {
                     // Focus mode shows a single dedicated topic panel and
                     // only honours j/k drill keys + f/Esc/q. Sort and
@@ -594,6 +647,11 @@ fn event_loop(terminal: &mut Terminal<CrosstermBackend<Stdout>>, app: &mut App) 
                             app.paused = !app.paused;
                         }
                         (_, _) if app.scope.active => {}
+                        (KeyCode::Char('g'), _) => {
+                            if let Some(topic) = selected_topic.as_deref() {
+                                app.enter_node_graph(topic);
+                            }
+                        }
                         (KeyCode::Char('w'), _) => {
                             if let Some(topic) = selected_topic.as_deref() {
                                 app.enter_scope(topic);
@@ -661,6 +719,9 @@ fn event_loop(terminal: &mut Terminal<CrosstermBackend<Stdout>>, app: &mut App) 
                             app.fullscreen = true;
                             app.enter_scope(topic);
                         }
+                    }
+                    (KeyCode::Char('g'), _, Focus::Topics) if selected_topic.is_some() => {
+                        app.enter_node_graph(selected_topic.as_deref().expect("guarded above"));
                     }
                     // Inspector-pane navigation.
                     (KeyCode::Char('j'), _, Focus::Inspector)

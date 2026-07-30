@@ -19,4 +19,4 @@
 
 - [x] 4.1 Add TestBackend render coverage for active, idle, unavailable, deduplicated, overflow, and disappeared-topic graph states
 - [x] 4.2 Update README controls/roadmap and changelog
-- [ ] 4.3 Run formatting, Clippy, default/live tests, and OpenSpec validation
+- [x] 4.3 Run formatting, Clippy, default/live tests, and OpenSpec validation

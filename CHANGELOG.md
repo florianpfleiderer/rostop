@@ -53,6 +53,12 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- **Live selected-topic node graph.** Press `g` from the topic table or focus
+  view to open a full-terminal publisher → topic → subscriber topology.
+  Endpoints are deduplicated by fully-qualified node, large graphs use bounded
+  `+N more` summaries, unavailable graph sides remain distinct from empty
+  sides, and recent topic samples animate candidate paths without claiming
+  per-publisher attribution.
 - **Explicit ROS domain selection.** `rostop --domain <0-232>` overrides
   `ROS_DOMAIN_ID`, validates the DDS protocol range before startup, and shows
   the active domain in the topic-table title.

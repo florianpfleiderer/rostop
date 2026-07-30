@@ -1024,6 +1024,7 @@ dependencies = [
  "r2r",
  "ratatui",
  "rostop-core",
+ "serde",
  "serde_json",
  "tokio",
  "tracing",

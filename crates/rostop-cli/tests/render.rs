@@ -10,6 +10,36 @@ use rostop_cli::domain::DomainProbeResult;
 use rostop_cli::test_support::{render_once, AppHandle};
 use rostop_core::message::DynamicValue;
 
+fn selected_topic(handle: &AppHandle) -> String {
+    handle
+        .app
+        .registry
+        .sorted_by(
+            handle.app.sort_key,
+            handle.app.sort_order,
+            handle.app.elapsed_ns(),
+        )
+        .get(handle.app.selected)
+        .expect("selected demo topic")
+        .name
+        .clone()
+}
+
+fn render_dump(handle: &mut AppHandle, width: u16, height: u16) -> String {
+    let backend = TestBackend::new(width, height);
+    let mut terminal = Terminal::new(backend).unwrap();
+    render_once(&mut terminal, handle);
+    let buf = terminal.backend().buffer();
+    (0..buf.area.height)
+        .map(|y| {
+            (0..buf.area.width)
+                .map(|x| buf[(x, y)].symbol())
+                .collect::<String>()
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
 #[test]
 fn demo_backend_topics_render_after_a_few_ticks() {
     let mut app = AppHandle::demo();
@@ -285,6 +315,87 @@ fn domain_scan_modal_reports_visible_domains() {
             "expected {needle:?} in domain modal:\n{dump}"
         );
     }
+}
+
+#[test]
+fn node_graph_renders_live_animated_pub_to_sub_flow() {
+    let mut handle = AppHandle::demo();
+    handle.tick(Duration::from_millis(250));
+    let topic = selected_topic(&handle);
+    handle.app.enter_node_graph(&topic);
+
+    let dump = render_dump(&mut handle, 140, 30);
+    for needle in [
+        "NODE GRAPH",
+        "PUBLISHERS",
+        "TOPIC",
+        "SUBSCRIBERS",
+        "TRAFFIC",
+        "◆",
+        "/demo_pub",
+        "/demo_sub",
+        "[GRAPH]",
+        "g/Esc:back",
+    ] {
+        assert!(
+            dump.contains(needle),
+            "expected {needle:?} in active node graph:\n{dump}"
+        );
+    }
+}
+
+#[test]
+fn node_graph_deduplicates_bounds_and_labels_unavailable_idle_side() {
+    let mut handle = AppHandle::demo();
+    handle.tick(Duration::from_millis(100));
+    let topic = selected_topic(&handle);
+    let template = handle
+        .app
+        .endpoints
+        .get(&topic)
+        .and_then(|(publishers, _)| publishers.as_ref())
+        .and_then(|publishers| publishers.first())
+        .expect("demo publisher endpoint")
+        .clone();
+    let mut publishers = Vec::new();
+    for index in 0..14 {
+        let mut endpoint = template.clone();
+        endpoint.node_name = format!("publisher_{index:02}");
+        endpoint.endpoint_gid = vec![index as u8];
+        publishers.push(endpoint);
+    }
+    let mut duplicate = template;
+    duplicate.node_name = "publisher_00".into();
+    duplicate.endpoint_gid = vec![255];
+    publishers.push(duplicate);
+    handle
+        .app
+        .endpoints
+        .insert(topic.clone(), (Some(publishers), None));
+    handle.app.topic_activity.remove(&topic);
+    handle.app.enter_node_graph(&topic);
+
+    let dump = render_dump(&mut handle, 100, 16);
+    for needle in ["IDLE", "×2", "+", "(not available)", "topology live"] {
+        assert!(
+            dump.contains(needle),
+            "expected {needle:?} in bounded idle graph:\n{dump}"
+        );
+    }
+    assert!(
+        !dump.contains('◆'),
+        "idle graph must not show moving activity marker:\n{dump}"
+    );
+}
+
+#[test]
+fn node_graph_handles_disappeared_topic() {
+    let mut handle = AppHandle::demo();
+    handle.app.enter_node_graph("/topic_that_disappeared");
+    let dump = render_dump(&mut handle, 100, 18);
+    assert!(dump.contains("topic unavailable"), "{dump}");
+    assert!(dump.contains("disappeared from the live graph"), "{dump}");
+    assert!(dump.contains("g or Esc to return"), "{dump}");
 }
 
 #[test]

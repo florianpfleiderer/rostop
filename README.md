@@ -7,7 +7,7 @@
 [![ROS 2 Jazzy](https://img.shields.io/badge/ROS%202-Jazzy-22314E?logo=ros&logoColor=white)](https://docs.ros.org/en/jazzy/)
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](#license)
 
-> Interactive TUI for inspecting and debugging ROS 2 topics — like `htop`, for robots.
+> Interactive TUI for inspecting and debugging ROS 2 topics — like `htop/btop/bottom`, but for robots.
 
 `rostop` is a fast, terminal-native tool for inspecting a running ROS 2 system: live topic list with rate / bandwidth / jitter, drill-in message inspector with decoded fields and sparklines, filter, sort, search. Built in Rust with [`ratatui`](https://github.com/ratatui-org/ratatui) and a swappable backend trait.
 

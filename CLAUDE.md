@@ -11,7 +11,7 @@ just image-jazzy            # build the Jazzy dev image (idempotent, ~10 min col
 just test-jazzy             # cargo test --workspace inside the container
 just test-core-jazzy        # only rostop-core (no ROS link — fastest feedback)
 just build-jazzy
-just run-jazzy -- --demo    # fabricated 6-topic demo, no ROS traffic needed
+just run-jazzy --demo       # fabricated 6-topic demo, no ROS traffic needed
 just run-jazzy              # talk to a real ROS 2 system (--network=host)
 just fmt-jazzy
 just clippy-jazzy           # cargo clippy --workspace --all-targets -- -D warnings (must pass)
@@ -136,7 +136,7 @@ The `.claude/settings.json` allowlist exists so trivial reads (status / log / `c
 
 - **`just image-<distro>`** — builds the Jazzy/Humble dev image from scratch. ~10 minutes cold, downloads several hundred MB. Never run this speculatively; ask whether the user has it built already (`docker image inspect rostop-dev:<distro>` is read-only and fine).
 - **`just test-<distro>`, `just build-<distro>`, `just clippy-<distro>`, `just fmt-<distro>`** — all route through `scripts/dev.sh` and will trigger `docker build` if the image isn't present. Once the image exists they're cheap, but cold-start cost is hidden behind the recipe name. Ask before the first invocation of a session, or run `docker image inspect rostop-dev:<distro>` first to confirm the image exists.
-- **`just run-<distro>`** (without `-- --demo`) — opens the TUI inside a `--network=host --ipc=host` container and connects to whatever real ROS 2 system the user has on their LAN. It takes over the terminal, may interfere with debugging the user is doing on the same robot, and is not something to run "to check." Use `-- --demo` if you genuinely need to exercise the binary; otherwise ask.
+- **`just run-<distro>`** (without `--demo`) — opens the TUI inside a `--network=host --ipc=host` container and connects to whatever real ROS 2 system the user has on their LAN. It takes over the terminal, may interfere with debugging the user is doing on the same robot, and is not something to run "to check." Use `--demo` if you genuinely need to exercise the binary; otherwise ask.
 - **`just package-<distro>`** — full release build of the `.deb`. Long compile, writes to `dist/`. Only run when the user is preparing a release.
 - **`cargo clean` / `just clean-<distro>`** — wipes the per-distro `rostop-target-<distro>` Docker volume. The next build will be cold and slow. Don't run this to "reset" something — diagnose the actual problem first.
 - **`cargo update`** — touches `Cargo.lock` and can cascade into unintended dep bumps across the workspace. Only run when the user has explicitly asked to update dependencies.

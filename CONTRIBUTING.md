@@ -31,7 +31,7 @@ The repo doesn't pick a default ROS distro. Every `just` recipe is suffixed with
 ```bash
 just image-jazzy          # build the Jazzy dev image
 just test-jazzy           # cargo test --workspace inside the Jazzy container
-just run-jazzy -- --demo  # launch the TUI with the fabricated 6-topic demo
+just run-jazzy --demo     # launch the TUI with the fabricated 6-topic demo
 
 just image-humble         # same for Humble
 just test-humble

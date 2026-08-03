@@ -55,7 +55,7 @@ cd rostop
 # Jazzy + CycloneDDS (Ubuntu 24.04)
 just image-jazzy          # build the Jazzy dev env (ROS 2 Jazzy + Rust 1.88)
 just test-jazzy           # cargo test --workspace, all green
-just run-jazzy -- --demo  # launches the TUI with a fabricated 6-topic system
+just run-jazzy --demo     # launches the TUI with a fabricated 6-topic system
 
 # Humble + Fast DDS (Ubuntu 22.04)
 just image-humble         # build the Humble dev env (ROS 2 Humble + Rust 1.88)
@@ -114,7 +114,7 @@ Every distro has the same recipe block; replace `<distro>` with `jazzy` or `humb
 | `just test-<distro>`         | `cargo test --workspace` inside the `<distro>` container.                     |
 | `just build-<distro>`        | `cargo build --workspace` inside the `<distro>` container.                    |
 | `just run-<distro>`          | Connect to a real ROS 2 system on the host (see below).                       |
-| `just run-<distro> -- --demo` | Launch the TUI with the fabricated demo backend (no ROS traffic needed).     |
+| `just run-<distro> --demo`   | Launch the TUI with the fabricated demo backend (no ROS traffic needed).      |
 | `just fmt-<distro>` / `just clippy-<distro>` | Format + lint inside the `<distro>` container.                |
 | `just clean-<distro>`        | `cargo clean` inside the `<distro>` container.                                |
 | `just package-<distro>`      | Build the `<distro>` `.deb` into `dist/`.                                     |
@@ -136,12 +136,12 @@ Same source tree, different build container. `scripts/dev.sh` picks the Dockerfi
 
 ### Running against a real ROS 2 system
 
-The `just run-<distro>` recipes launch the container with `--network=host` and `--ipc=host`, so DDS discovery reaches the topics on your robot or workstation just like a native install would. Append `-- --demo` to swap in the fabricated demo backend without rebuilding.
+The `just run-<distro>` recipes launch the container with `--network=host` and `--ipc=host`, so DDS discovery reaches the topics on your robot or workstation just like a native install would. Append `--demo` to swap in the fabricated demo backend without rebuilding — anything after the recipe name is forwarded to the `rostop` binary as-is (no `--` separator needed).
 
 ```bash
 # Jazzy (CycloneDDS default)
 just run-jazzy              # uses host's ROS_DOMAIN_ID + RMW
-just run-jazzy -- --demo    # fabricated demo backend (no ROS traffic)
+just run-jazzy --demo       # fabricated demo backend (no ROS traffic)
 just run-jazzy --some-flag  # extra args forwarded to the rostop binary
 
 # Humble (Fast DDS default)

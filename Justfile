@@ -31,7 +31,7 @@ build-jazzy *args:
 # Run the CLI against a real Jazzy ROS 2 system on the host (host network so DDS
 # discovery works). Honours ROS_DOMAIN_ID (default 0) and RMW_IMPLEMENTATION
 # (default rmw_cyclonedds_cpp) from the caller's env.
-# Pass `-- --demo` to swap in the fabricated demo backend (no ROS traffic needed).
+# Pass `--demo` to swap in the fabricated demo backend (no ROS traffic needed).
 run-jazzy *args:
     #!/usr/bin/env bash
     set -euo pipefail
@@ -102,7 +102,7 @@ build-humble *args:
 # Run the CLI against a real Humble ROS 2 system on the host (host network so DDS
 # discovery works). Honours ROS_DOMAIN_ID (default 0) and RMW_IMPLEMENTATION
 # (default rmw_fastrtps_cpp — Humble's default RMW).
-# Pass `-- --demo` to swap in the fabricated demo backend (no ROS traffic needed).
+# Pass `--demo` to swap in the fabricated demo backend (no ROS traffic needed).
 run-humble *args:
     #!/usr/bin/env bash
     set -euo pipefail
